@@ -1,1142 +1,768 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import requests
+"""
+Evaluation Generation and Scoring System
+Implements FR-SKILLS-010, FR-SKILLS-011, FR-SKILLS-012 from the PRD:
+- Generate structured evaluation report with weighted scores
+- Weight bonus elements by impact
+- Integrate with competency framework to map skills demonstrated
+"""
+
+from typing import Dict, List, Any, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
 import json
+import math
 from datetime import datetime
-from typing import Dict, List, Any
-import time
-import re
-from dataclasses import asdict
-
-# Import our evaluation system (assuming evaluation_scoring.py is in the same directory)
-try:
-    from evaluation_scoring import (
-        EvaluationGenerator, 
-        RecommendationType, 
-        EvaluationReport,
-        ScoreBreakdown
-    )
-except ImportError:
-    st.error("Please ensure evaluation_scoring.py is in the same directory")
-    st.stop()
-
-# Page configuration
-st.set_page_config(
-    page_title="SkillScribe - AI-Powered Technical Assessment",
-    page_icon="🎯",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Custom CSS for better styling
-st.markdown("""
-<style>
-.metric-card {
-    background-color: #f0f2f6;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    border-left: 5px solid #1f77b4;
-}
-
-.success-card {
-    background-color: #d4edda;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    border-left: 5px solid #28a745;
-}
-
-.warning-card {
-    background-color: #fff3cd;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    border-left: 5px solid #ffc107;
-}
-
-.danger-card {
-    background-color: #f8d7da;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    border-left: 5px solid #dc3545;
-}
-
-.stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-    font-size: 18px;
-}
-</style>
-""", unsafe_allow_html=True)
 
 
-class MockEvidenceItem:
-    """Mock evidence item for demonstration"""
-    def __init__(self, requirement_id: str, description: str, passed: bool, 
-                 evidence_type: str = "correctness", file_path: str = "", line_number: int = 0):
-        self.requirement_id = requirement_id
-        self.description = description
-        self.passed = passed
-        self.evidence_type = evidence_type
-        self.file_path = file_path
-        self.line_number = line_number
+class RecommendationType(Enum):
+    """Final recommendation types as per PRD"""
+    STRONG_HIRE = "Strong Hire"
+    TECH_INTERVIEW = "Tech Interview" 
+    REJECT = "Reject"
 
 
-def init_session_state():
-    """Initialize session state variables"""
-    if 'evaluations' not in st.session_state:
-        st.session_state.evaluations = []
+@dataclass
+class ScoreBreakdown:
+    """Detailed breakdown of scoring components"""
+    component_name: str
+    raw_score: float
+    weighted_score: float
+    weight: float
+    evidence_count: int
+    confidence: float
+    details: List[str]
+
+
+@dataclass
+class EvaluationReport:
+    """Complete evaluation report as specified in PRD"""
+    candidate_repo_url: str
+    evaluation_timestamp: str
     
-    if 'current_evaluation' not in st.session_state:
-        st.session_state.current_evaluation = None
+    # Core scores (as per PRD: 40% + 30% + 30%)
+    technical_compliance_score: float  # 40%
+    communication_quality_score: float  # 30%
+    problem_solving_depth_score: float  # 30%
+    weighted_total_score: float
     
-    if 'answer_keys' not in st.session_state:
-        st.session_state.answer_keys = {}
+    # Score breakdowns
+    technical_breakdown: ScoreBreakdown
+    communication_breakdown: ScoreBreakdown
+    problem_solving_breakdown: ScoreBreakdown
+    
+    # Competency assessments
+    competency_assessments: List[Any]  # CompetencyAssessment objects
+    
+    # Critical insights
+    critical_strengths: List[str]
+    critical_gaps: List[str]
+    red_flags: List[str]
+    
+    # Recommendations
+    final_recommendation: RecommendationType
+    growth_recommendations: List[str]
+    
+    # Evidence trail
+    evidence_summary: Dict[str, int]
+    pitfall_deductions: List[Dict[str, Any]]
+    bonus_points: List[Dict[str, Any]]
+    
+    # Metadata
+    evaluation_confidence: float
+    framework_coverage: float
 
 
-def load_sample_data():
-    """Load sample data for demonstration"""
+class EvidenceScorer:
+    """Scores evidence items based on type and quality"""
     
-    # Sample answer key for HDB case study
-    sample_answer_key = {
-        "problem_statement": "Using relevant data from 2017 onwards, quantify the business impact on agents of the HDB resale portal launch",
-        "look_out_for": [
-            "Clearly distinguishes between impact of portal on buyers' and sellers' reliance on property agents",
-            "Uses appropriate statistical methods for time series analysis",
-            "Provides clear visualization of trends before and after portal launch"
-        ],
-        "pitfalls": [
-            "Sweeping conclusions using 'total' instead of ratio or percentages",
-            "Ignoring seasonal patterns in real estate data",
-            "Not accounting for other market factors affecting agent usage"
-        ],
-        "bonus": [
-            "Further slicing by HDB towns - Are transactions in some areas more affected than others?",
-            "Advanced statistical modeling (ARIMA, interrupted time series)",
-            "Creative visualization showing impact magnitude"
+    def __init__(self):
+        self.scoring_weights = {
+            "existence": 0.2,      # Basic existence of required artifacts
+            "correctness": 0.5,    # Implementation matches requirements
+            "completeness": 0.3    # All edge cases addressed
+        }
+    
+    def score_evidence_items(self, evidence_items: List[Any]) -> Dict[str, Any]:
+        """Score all evidence items and categorize by type"""
+        
+        scores = {
+            "existence": {"passed": 0, "total": 0, "items": []},
+            "correctness": {"passed": 0, "total": 0, "items": []},
+            "completeness": {"passed": 0, "total": 0, "items": []}
+        }
+        
+        pitfall_deductions = []
+        bonus_points = []
+        
+        for item in evidence_items:
+            evidence_type = getattr(item, 'evidence_type', 'correctness')
+            
+            if evidence_type in scores:
+                scores[evidence_type]["total"] += 1
+                scores[evidence_type]["items"].append(item)
+                
+                if item.passed:
+                    scores[evidence_type]["passed"] += 1
+                
+                # Check for pitfalls and bonuses
+                if hasattr(item, 'requirement_id'):
+                    if item.requirement_id.startswith('pitfall_') and not item.passed:
+                        # Pitfall triggered
+                        pitfall_deductions.append({
+                            "pitfall_id": item.requirement_id,
+                            "description": item.description,
+                            "deduction": 15.0,  # 15% deduction as per PRD
+                            "file_path": item.file_path,
+                            "line_number": item.line_number
+                        })
+                    
+                    elif item.requirement_id.startswith('bonus_') and item.passed:
+                        # Bonus achieved
+                        bonus_points.append({
+                            "bonus_id": item.requirement_id,
+                            "description": item.description,
+                            "points": 5.0,  # 5% bonus as per PRD
+                            "file_path": item.file_path,
+                            "line_number": item.line_number
+                        })
+        
+        return {
+            "scores": scores,
+            "pitfall_deductions": pitfall_deductions,
+            "bonus_points": bonus_points
+        }
+
+
+class TechnicalComplianceScorer:
+    """Scores technical compliance (40% of total score)"""
+    
+    def __init__(self):
+        self.base_weight = 0.4
+    
+    def calculate_score(self, evidence_scores: Dict[str, Any], 
+                       answer_key: Dict[str, Any]) -> ScoreBreakdown:
+        """Calculate technical compliance score"""
+        
+        scores = evidence_scores["scores"]
+        
+        # Calculate component scores
+        existence_score = self._calculate_component_score(scores["existence"])
+        correctness_score = self._calculate_component_score(scores["correctness"])
+        completeness_score = self._calculate_component_score(scores["completeness"])
+        
+        # Weight the components (existence: 20%, correctness: 50%, completeness: 30%)
+        raw_score = (
+            existence_score * 0.2 +
+            correctness_score * 0.5 +
+            completeness_score * 0.3
+        )
+        
+        # Apply pitfall deductions
+        pitfall_deduction = sum(p["deduction"] for p in evidence_scores["pitfall_deductions"])
+        raw_score = max(0, raw_score - pitfall_deduction)
+        
+        # Apply bonus points (capped at 100)
+        bonus_addition = sum(b["points"] for b in evidence_scores["bonus_points"])
+        raw_score = min(100, raw_score + bonus_addition)
+        
+        # Calculate weighted score
+        weighted_score = raw_score * self.base_weight
+        
+        # Generate details
+        details = [
+            f"Existence verification: {existence_score:.1f}% ({scores['existence']['passed']}/{scores['existence']['total']} passed)",
+            f"Correctness verification: {correctness_score:.1f}% ({scores['correctness']['passed']}/{scores['correctness']['total']} passed)",
+            f"Completeness verification: {completeness_score:.1f}% ({scores['completeness']['passed']}/{scores['completeness']['total']} passed)"
         ]
-    }
-    
-    # Sample stakeholder profile
-    sample_stakeholder_profile = {
-        "audience": "general_public",
-        "technical_level": "basic",
-        "decision_makers": ["HDB management", "Policy makers"],
-        "communication_weight": 0.3
-    }
-    
-    # Sample problem elements
-    sample_problem_elements = {
-        "hidden_dimensions": ["Buyer reliance", "Seller reliance", "Geographic variation"],
-        "temporal_factors": ["Seasonality", "Market cycles", "Policy changes"],
-        "complexity_level": "intermediate"
-    }
-    
-    return sample_answer_key, sample_stakeholder_profile, sample_problem_elements
-
-
-def create_sample_evidence_items(repo_url: str) -> List[MockEvidenceItem]:
-    """Create sample evidence items for demonstration"""
-    
-    evidence_items = [
-        # Existence checks
-        MockEvidenceItem("existence_data_loading", "Data files are properly loaded", True, "existence", "data_loader.py", 15),
-        MockEvidenceItem("existence_analysis_notebook", "Analysis notebook exists", True, "existence", "analysis.ipynb", 1),
-        MockEvidenceItem("existence_visualization", "Visualization code exists", True, "existence", "visualizations.py", 45),
         
-        # Correctness checks
-        MockEvidenceItem("correctness_buyer_seller_split", "Correctly separates buyer and seller transactions", True, "correctness", "analysis.py", 128),
-        MockEvidenceItem("correctness_time_series", "Proper time series analysis implementation", True, "correctness", "analysis.py", 245),
-        MockEvidenceItem("correctness_statistical_test", "Appropriate statistical tests applied", False, "correctness", "analysis.py", 312),
+        if pitfall_deduction > 0:
+            details.append(f"Pitfall deductions: -{pitfall_deduction:.1f}%")
         
-        # Completeness checks
-        MockEvidenceItem("completeness_edge_cases", "Handles edge cases and missing data", True, "completeness", "data_cleaning.py", 89),
-        MockEvidenceItem("completeness_validation", "Includes result validation", False, "completeness", "validation.py", 23),
+        if bonus_addition > 0:
+            details.append(f"Bonus points: +{bonus_addition:.1f}%")
         
-        # Pitfalls
-        MockEvidenceItem("pitfall_absolute_numbers", "Uses ratios instead of absolute numbers", False, "correctness", "analysis.py", 187),
+        # Calculate confidence based on evidence quality
+        total_evidence = sum(s["total"] for s in scores.values())
+        confidence = min(total_evidence / 10.0, 1.0)  # Normalize to 0-1
         
-        # Bonuses
-        MockEvidenceItem("bonus_geographic_analysis", "Geographic breakdown by HDB towns", True, "correctness", "geographic_analysis.py", 67),
-    ]
+        return ScoreBreakdown(
+            component_name="Technical Compliance",
+            raw_score=raw_score,
+            weighted_score=weighted_score,
+            weight=self.base_weight,
+            evidence_count=total_evidence,
+            confidence=confidence,
+            details=details
+        )
     
-    return evidence_items
-
-
-def mock_github_analysis(repo_url: str) -> Dict[str, Any]:
-    """Mock GitHub repository analysis"""
-    
-    return {
-        "repository_info": {
-            "name": repo_url.split("/")[-1],
-            "url": repo_url,
-            "files_analyzed": 12,
-            "total_lines": 2847
-        },
-        "detailed_analysis": {
-            "code_analysis": [
-                {
-                    "file_path": "analysis.py",
-                    "imports": ["pandas", "numpy", "matplotlib", "seaborn", "scipy.stats"],
-                    "functions": ["load_data", "clean_data", "analyze_trends", "statistical_test"],
-                    "variables": ["buyer_data", "seller_data", "portal_launch_date", "trend_analysis"],
-                    "visualization_calls": ["plt.plot", "sns.barplot", "plt.histogram"],
-                    "function_calls": ["ttest_ind", "pearsonr", "describe"]
-                }
-            ],
-            "notebook_analysis": [
-                {
-                    "file_path": "analysis.ipynb",
-                    "markdown_cells": 8,
-                    "code_cells": 15,
-                    "has_visualizations": True,
-                    "output_quality": "good"
-                }
-            ]
-        },
-        "documentation": [
-            {"path": "README.md", "exists": True},
-            {"path": "requirements.txt", "exists": True}
-        ],
-        "quality_metrics": {
-            "code_complexity": "medium",
-            "documentation_coverage": 0.7,
-            "test_coverage": 0.3
-        }
-    }
-
-
-def display_evaluation_form():
-    """Display the main evaluation form"""
-    
-    st.header("🎯 New Technical Assessment")
-    
-    with st.form("evaluation_form"):
-        col1, col2 = st.columns(2)
+    def _calculate_component_score(self, component_data: Dict[str, Any]) -> float:
+        """Calculate score for a component (existence/correctness/completeness)"""
+        if component_data["total"] == 0:
+            return 0.0
         
-        with col1:
-            st.subheader("📋 Basic Information")
-            candidate_name = st.text_input("Candidate Name")
-            repo_url = st.text_input(
-                "GitHub Repository URL",
-                placeholder="https://github.com/username/repository",
-                help="Enter the candidate's GitHub repository URL for analysis"
-            )
-            position = st.selectbox(
-                "Position Applied For",
-                ["Data Scientist", "Software Engineer", "ML Engineer", "DevOps Engineer", "Other"]
-            )
+        return (component_data["passed"] / component_data["total"]) * 100
+
+
+class CommunicationQualityScorer:
+    """Scores communication quality (30% of total score)"""
+    
+    def __init__(self):
+        self.base_weight = 0.3
+    
+    def calculate_score(self, evidence_scores: Dict[str, Any],
+                       repo_analysis: Dict[str, Any],
+                       stakeholder_profile: Dict[str, Any]) -> ScoreBreakdown:
+        """Calculate communication quality score"""
         
-        with col2:
-            st.subheader("🎨 Assessment Configuration")
-            case_study = st.selectbox(
-                "Case Study Type",
-                ["HDB Resale Portal Impact", "COE Bidding Analysis", "Traffic Pattern Analysis", "Custom"]
-            )
-            
-            stakeholder_audience = st.selectbox(
-                "Target Audience",
-                ["General Public", "Technical Team", "Senior Management", "Policy Makers"]
-            )
-            
-            priority_weights = st.slider(
-                "Communication Weight (%)",
-                min_value=10,
-                max_value=50,
-                value=30,
-                help="Adjust based on role requirements"
-            )
+        # Base score from evidence
+        base_score = self._calculate_base_communication_score(evidence_scores, repo_analysis)
         
-        # Advanced settings in expandable section
-        with st.expander("🔧 Advanced Settings"):
-            st.subheader("Evaluation Criteria")
-            
-            col3, col4 = st.columns(2)
-            with col3:
-                technical_weight = st.slider("Technical Compliance Weight", 30, 60, 40)
-                enable_pitfall_deductions = st.checkbox("Enable Pitfall Deductions", value=True)
-                
-            with col4:
-                problem_solving_weight = st.slider("Problem Solving Weight", 20, 40, 30)
-                enable_bonus_points = st.checkbox("Enable Bonus Points", value=True)
-            
-            # Ensure weights sum to 100
-            comm_weight = 100 - technical_weight - problem_solving_weight
-            st.info(f"Calculated weights: Technical ({technical_weight}%), Communication ({comm_weight}%), Problem Solving ({problem_solving_weight}%)")
-        
-        submitted = st.form_submit_button("🚀 Start Evaluation", type="primary")
-        
-        if submitted:
-            if not repo_url or not candidate_name:
-                st.error("Please fill in all required fields")
-                return
-            
-            if not repo_url.startswith("https://github.com/"):
-                st.error("Please enter a valid GitHub repository URL")
-                return
-            
-            # Start the evaluation process
-            start_evaluation(candidate_name, repo_url, case_study, stakeholder_audience)
-
-
-def start_evaluation(candidate_name: str, repo_url: str, case_study: str, audience: str):
-    """Start the evaluation process"""
-    
-    st.success(f"✅ Starting evaluation for {candidate_name}")
-    
-    # Create progress bar
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-    
-    # Step 1: Repository Analysis
-    status_text.text("🔍 Step 1/4: Analyzing GitHub repository...")
-    progress_bar.progress(25)
-    time.sleep(1)  # Simulate processing time
-    
-    repo_analysis = mock_github_analysis(repo_url)
-    
-    # Step 2: Evidence Collection
-    status_text.text("📊 Step 2/4: Collecting evidence items...")
-    progress_bar.progress(50)
-    time.sleep(1)
-    
-    evidence_items = create_sample_evidence_items(repo_url)
-    
-    # Step 3: Load Configuration
-    status_text.text("⚙️ Step 3/4: Loading assessment configuration...")
-    progress_bar.progress(75)
-    time.sleep(1)
-    
-    answer_key, stakeholder_profile, problem_elements = load_sample_data()
-    
-    # Adjust stakeholder profile based on user input
-    stakeholder_profile["audience"] = audience.lower().replace(" ", "_")
-    
-    # Step 4: Generate Evaluation
-    status_text.text("🎯 Step 4/4: Generating evaluation report...")
-    progress_bar.progress(100)
-    time.sleep(1)
-    
-    # Generate the evaluation
-    evaluator = EvaluationGenerator()
-    evaluation_report = evaluator.generate_evaluation(
-        candidate_repo_url=repo_url,
-        evidence_items=evidence_items,
-        repo_analysis=repo_analysis,
-        answer_key=answer_key,
-        problem_elements=problem_elements,
-        stakeholder_profile=stakeholder_profile
-    )
-    
-    # Add metadata
-    evaluation_report.candidate_name = candidate_name
-    evaluation_report.case_study = case_study
-    evaluation_report.position = getattr(st.session_state, 'position', 'Data Scientist')
-    
-    # Store in session state
-    st.session_state.current_evaluation = evaluation_report
-    st.session_state.evaluations.append(evaluation_report)
-    
-    status_text.text("✅ Evaluation completed successfully!")
-    time.sleep(1)
-    
-    # Clear progress indicators
-    progress_bar.empty()
-    status_text.empty()
-    
-    st.success("🎉 Evaluation completed! View results below.")
-    st.rerun()
-
-
-def display_evaluation_results():
-    """Display the evaluation results"""
-    
-    if not st.session_state.current_evaluation:
-        st.info("No evaluation results to display. Please run an assessment first.")
-        return
-    
-    evaluation = st.session_state.current_evaluation
-    
-    st.header("📈 Evaluation Results")
-    
-    # Overall Score Display
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3>Overall Score</h3>
-            <h1>{evaluation.weighted_total_score:.1f}%</h1>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        recommendation_color = {
-            RecommendationType.STRONG_HIRE: "success",
-            RecommendationType.TECH_INTERVIEW: "warning", 
-            RecommendationType.REJECT: "danger"
-        }
-        color = recommendation_color.get(evaluation.final_recommendation, "info")
-        
-        st.markdown(f"""
-        <div class="{color}-card">
-            <h3>Recommendation</h3>
-            <h2>{evaluation.final_recommendation.value}</h2>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        confidence_color = "success" if evaluation.evaluation_confidence > 0.7 else "warning"
-        st.markdown(f"""
-        <div class="{confidence_color}-card">
-            <h3>Confidence</h3>
-            <h2>{evaluation.evaluation_confidence*100:.0f}%</h2>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3>Evidence Items</h3>
-            <h2>{sum(evaluation.evidence_summary.values())}</h2>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Detailed Results in Tabs
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📊 Score Breakdown", 
-        "🔍 Evidence Analysis", 
-        "💡 Insights & Recommendations", 
-        "📋 Competency Framework",
-        "📄 Full Report"
-    ])
-    
-    with tab1:
-        display_score_breakdown(evaluation)
-    
-    with tab2:
-        display_evidence_analysis(evaluation)
-    
-    with tab3:
-        display_insights_recommendations(evaluation)
-    
-    with tab4:
-        display_competency_framework(evaluation)
-    
-    with tab5:
-        display_full_report(evaluation)
-
-
-def display_score_breakdown(evaluation: EvaluationReport):
-    """Display detailed score breakdown"""
-    
-    st.subheader("📊 Score Breakdown Analysis")
-    
-    # Create score visualization
-    fig = make_subplots(
-        rows=2, cols=2,
-        subplot_titles=("Overall Scores", "Component Breakdown", "Evidence Summary", "Confidence Levels"),
-        specs=[[{"type": "indicator"}, {"type": "bar"}],
-               [{"type": "pie"}, {"type": "bar"}]]
-    )
-    
-    # Overall score gauge
-    fig.add_trace(
-        go.Indicator(
-            mode="gauge+number+delta",
-            value=evaluation.weighted_total_score,
-            domain={'x': [0, 1], 'y': [0, 1]},
-            title={'text': "Overall Score"},
-            gauge={
-                'axis': {'range': [None, 100]},
-                'bar': {'color': "darkblue"},
-                'steps': [
-                    {'range': [0, 50], 'color': "lightgray"},
-                    {'range': [50, 70], 'color': "yellow"},
-                    {'range': [70, 100], 'color': "green"}
-                ],
-                'threshold': {
-                    'line': {'color': "red", 'width': 4},
-                    'thickness': 0.75,
-                    'value': 90
-                }
-            }
-        ),
-        row=1, col=1
-    )
-    
-    # Component scores
-    components = ['Technical Compliance', 'Communication Quality', 'Problem Solving']
-    scores = [
-        evaluation.technical_compliance_score,
-        evaluation.communication_quality_score,
-        evaluation.problem_solving_depth_score
-    ]
-    weights = [40, 30, 30]
-    
-    fig.add_trace(
-        go.Bar(
-            x=components,
-            y=scores,
-            text=[f"{score:.1f}% (Weight: {weight}%)" for score, weight in zip(scores, weights)],
-            textposition='auto',
-            marker_color=['#1f77b4', '#ff7f0e', '#2ca02c']
-        ),
-        row=1, col=2
-    )
-    
-    # Evidence summary pie chart
-    evidence_labels = list(evaluation.evidence_summary.keys())
-    evidence_values = list(evaluation.evidence_summary.values())
-    
-    fig.add_trace(
-        go.Pie(
-            labels=evidence_labels,
-            values=evidence_values,
-            hole=0.3
-        ),
-        row=2, col=1
-    )
-    
-    # Confidence levels
-    confidence_data = [
-        evaluation.technical_breakdown.confidence,
-        evaluation.communication_breakdown.confidence,
-        evaluation.problem_solving_breakdown.confidence,
-        evaluation.evaluation_confidence
-    ]
-    confidence_labels = ['Technical', 'Communication', 'Problem Solving', 'Overall']
-    
-    fig.add_trace(
-        go.Bar(
-            x=confidence_labels,
-            y=[c*100 for c in confidence_data],
-            text=[f"{c*100:.1f}%" for c in confidence_data],
-            textposition='auto',
-            marker_color='orange'
-        ),
-        row=2, col=2
-    )
-    
-    fig.update_layout(height=800, showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Detailed breakdown table
-    st.subheader("Detailed Score Components")
-    
-    breakdown_data = []
-    for breakdown in [evaluation.technical_breakdown, evaluation.communication_breakdown, evaluation.problem_solving_breakdown]:
-        breakdown_data.append({
-            "Component": breakdown.component_name,
-            "Raw Score": f"{breakdown.raw_score:.1f}%",
-            "Weight": f"{breakdown.weight*100:.0f}%",
-            "Weighted Score": f"{breakdown.weighted_score:.1f}",
-            "Evidence Count": breakdown.evidence_count,
-            "Confidence": f"{breakdown.confidence*100:.1f}%"
-        })
-    
-    df = pd.DataFrame(breakdown_data)
-    st.dataframe(df, use_container_width=True)
-
-
-def display_evidence_analysis(evaluation: EvaluationReport):
-    """Display evidence analysis"""
-    
-    st.subheader("🔍 Evidence Analysis")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### ✅ Pitfalls & Deductions")
-        if evaluation.pitfall_deductions:
-            for pitfall in evaluation.pitfall_deductions:
-                st.markdown(f"""
-                <div class="danger-card">
-                    <strong>⚠️ {pitfall['description']}</strong><br>
-                    <small>Deduction: -{pitfall['deduction']}% | File: {pitfall['file_path']}:{pitfall.get('line_number', 'N/A')}</small>
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown("")
-        else:
-            st.success("No critical pitfalls detected!")
-    
-    with col2:
-        st.markdown("### 🌟 Bonus Achievements")
-        if evaluation.bonus_points:
-            for bonus in evaluation.bonus_points:
-                st.markdown(f"""
-                <div class="success-card">
-                    <strong>🎯 {bonus['description']}</strong><br>
-                    <small>Bonus: +{bonus['points']}% | File: {bonus['file_path']}:{bonus.get('line_number', 'N/A')}</small>
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown("")
-        else:
-            st.info("No bonus achievements identified")
-    
-    # Evidence summary
-    st.markdown("### 📊 Evidence Summary")
-    
-    evidence_df = pd.DataFrame([
-        {"Type": "Existence Checks", "Count": evaluation.evidence_summary.get("existence_checks", 0)},
-        {"Type": "Correctness Checks", "Count": evaluation.evidence_summary.get("correctness_checks", 0)},
-        {"Type": "Completeness Checks", "Count": evaluation.evidence_summary.get("completeness_checks", 0)},
-        {"Type": "Pitfalls Triggered", "Count": evaluation.evidence_summary.get("pitfalls_triggered", 0)},
-        {"Type": "Bonuses Achieved", "Count": evaluation.evidence_summary.get("bonuses_achieved", 0)}
-    ])
-    
-    fig = px.bar(evidence_df, x="Type", y="Count", 
-                title="Evidence Item Distribution",
-                color="Count",
-                color_continuous_scale="viridis")
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def display_insights_recommendations(evaluation: EvaluationReport):
-    """Display insights and recommendations"""
-    
-    st.subheader("💡 Critical Insights & Recommendations")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("### 💪 Critical Strengths")
-        if evaluation.critical_strengths:
-            for strength in evaluation.critical_strengths:
-                st.markdown(f"""
-                <div class="success-card">
-                    <strong>✅ {strength}</strong>
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown("")
-        else:
-            st.info("No specific strengths identified")
-    
-    with col2:
-        st.markdown("### 🎯 Areas for Growth")
-        if evaluation.critical_gaps:
-            for gap in evaluation.critical_gaps:
-                st.markdown(f"""
-                <div class="warning-card">
-                    <strong>📈 {gap}</strong>
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown("")
-        else:
-            st.success("No significant gaps identified")
-    
-    with col3:
-        st.markdown("### 🚨 Red Flags")
-        if evaluation.red_flags:
-            for flag in evaluation.red_flags:
-                st.markdown(f"""
-                <div class="danger-card">
-                    <strong>🚨 {flag}</strong>
-                </div>
-                """, unsafe_allow_html=True)
-                st.markdown("")
-        else:
-            st.success("No red flags detected")
-    
-    # Growth recommendations
-    st.markdown("### 🌱 Growth Recommendations")
-    
-    if evaluation.growth_recommendations:
-        for i, rec in enumerate(evaluation.growth_recommendations, 1):
-            st.markdown(f"{i}. {rec}")
-    else:
-        st.info("No specific growth recommendations at this time")
-
-
-def display_competency_framework(evaluation: EvaluationReport):
-    """Display competency framework analysis"""
-    
-    st.subheader("📋 Competency Framework Assessment")
-    
-    if evaluation.competency_assessments:
-        # Create competency visualization
-        competencies = []
-        levels = []
-        
-        for assessment in evaluation.competency_assessments:
-            competencies.append(assessment.competency_name)
-            levels.append(assessment.level)
-        
-        fig = px.bar(
-            x=competencies,
-            y=levels,
-            title="Competency Level Assessment",
-            labels={"x": "Competency", "y": "Level (1-4)"},
-            color=levels,
-            color_continuous_scale="RdYlGn"
+        # Adjust for stakeholder alignment
+        stakeholder_adjustment = self._calculate_stakeholder_alignment(
+            repo_analysis, stakeholder_profile
         )
         
-        fig.update_layout(height=400)
-        st.plotly_chart(fig, use_container_width=True)
+        # Visualization quality assessment
+        viz_score = self._assess_visualization_quality(repo_analysis)
         
-        # Competency details table
-        comp_data = []
-        for assessment in evaluation.competency_assessments:
-            comp_data.append({
-                "Competency": assessment.competency_name,
-                "Current Level": f"L{assessment.level}",
-                "Evidence Count": assessment.evidence_count,
-                "Confidence": f"{assessment.confidence*100:.1f}%"
-            })
+        # Documentation quality assessment
+        doc_score = self._assess_documentation_quality(repo_analysis)
         
-        df = pd.DataFrame(comp_data)
-        st.dataframe(df, use_container_width=True)
-    else:
-        st.info("Competency framework assessment not available for this evaluation")
-    
-    # Framework coverage
-    st.metric(
-        "Framework Coverage",
-        f"{evaluation.framework_coverage*100:.1f}%",
-        help="Percentage of competency framework covered by this assessment"
-    )
-
-
-def display_full_report(evaluation: EvaluationReport):
-    """Display the full evaluation report"""
-    
-    st.subheader("📄 Complete Evaluation Report")
-    
-    # Report header
-    st.markdown(f"""
-    **Candidate:** {getattr(evaluation, 'candidate_name', 'N/A')}  
-    **Repository:** {evaluation.candidate_repo_url}  
-    **Evaluation Date:** {evaluation.evaluation_timestamp}  
-    **Case Study:** {getattr(evaluation, 'case_study', 'N/A')}  
-    **Position:** {getattr(evaluation, 'position', 'N/A')}
-    """)
-    
-    st.markdown("---")
-    
-    # Executive Summary
-    st.markdown("### Executive Summary")
-    st.markdown(f"""
-    The candidate achieved an overall weighted score of **{evaluation.weighted_total_score:.1f}%** 
-    with a recommendation of **{evaluation.final_recommendation.value}**. 
-    The evaluation confidence is **{evaluation.evaluation_confidence*100:.1f}%** based on 
-    {sum(evaluation.evidence_summary.values())} evidence items analyzed.
-    """)
-    
-    # Score breakdown
-    st.markdown("### Score Breakdown")
-    st.markdown(f"""
-    - **Technical Compliance:** {evaluation.technical_compliance_score:.1f}% (Weight: 40%)
-    - **Communication Quality:** {evaluation.communication_quality_score:.1f}% (Weight: 30%)
-    - **Problem Solving Depth:** {evaluation.problem_solving_depth_score:.1f}% (Weight: 30%)
-    """)
-    
-    # Technical breakdown details
-    st.markdown("### Technical Analysis Details")
-    for detail in evaluation.technical_breakdown.details:
-        st.markdown(f"- {detail}")
-    
-    # Communication breakdown details
-    st.markdown("### Communication Analysis Details")
-    for detail in evaluation.communication_breakdown.details:
-        st.markdown(f"- {detail}")
-    
-    # Problem solving breakdown details
-    st.markdown("### Problem Solving Analysis Details")
-    for detail in evaluation.problem_solving_breakdown.details:
-        st.markdown(f"- {detail}")
-    
-    # Export option
-    if st.button("📥 Export Report as JSON"):
-        report_dict = asdict(evaluation)
-        json_str = json.dumps(report_dict, indent=2, default=str)
-        st.download_button(
-            label="Download JSON Report",
-            data=json_str,
-            file_name=f"evaluation_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json"
-        )
-
-
-def display_history():
-    """Display evaluation history"""
-    
-    st.header("📚 Evaluation History")
-    
-    if not st.session_state.evaluations:
-        st.info("No evaluations completed yet. Run an assessment to see results here.")
-        return
-    
-    # Summary statistics
-    total_evaluations = len(st.session_state.evaluations)
-    avg_score = sum(e.weighted_total_score for e in st.session_state.evaluations) / total_evaluations
-    
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Evaluations", total_evaluations)
-    col2.metric("Average Score", f"{avg_score:.1f}%")
-    col3.metric("Strong Hires", sum(1 for e in st.session_state.evaluations if e.final_recommendation == RecommendationType.STRONG_HIRE))
-    
-    # Evaluation list
-    st.subheader("Recent Evaluations")
-    
-    for i, evaluation in enumerate(reversed(st.session_state.evaluations)):
-        with st.expander(f"Evaluation #{total_evaluations-i} - {getattr(evaluation, 'candidate_name', 'Unknown')} ({evaluation.weighted_total_score:.1f}%)"):
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.markdown(f"""
-                **Repository:** {evaluation.candidate_repo_url}  
-                **Score:** {evaluation.weighted_total_score:.1f}%  
-                **Recommendation:** {evaluation.final_recommendation.value}  
-                **Date:** {evaluation.evaluation_timestamp[:10]}
-                """)
-            
-            with col2:
-                if st.button(f"View Details", key=f"view_{i}"):
-                    st.session_state.current_evaluation = evaluation
-                    st.rerun()
-
-
-def main():
-    """Main application function"""
-    
-    # Initialize session state
-    init_session_state()
-    
-    # Sidebar navigation
-    st.sidebar.title("🎯 SkillScribe")
-    st.sidebar.markdown("*AI-Powered Technical Assessment Engine*")
-    
-    # Navigation menu
-    page = st.sidebar.selectbox(
-        "Navigation",
-        ["🏠 Home", "🎯 New Assessment", "📊 View Results", "📚 History", "⚙️ Configuration"]
-    )
-    
-    # Add current evaluation info in sidebar if available
-    if st.session_state.current_evaluation:
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### Current Evaluation")
-        evaluation = st.session_state.current_evaluation
-        st.sidebar.markdown(f"""
-        **Candidate:** {getattr(evaluation, 'candidate_name', 'N/A')}  
-        **Score:** {evaluation.weighted_total_score:.1f}%  
-        **Recommendation:** {evaluation.final_recommendation.value}
-        """)
-        
-        if st.sidebar.button("🗑️ Clear Current"):
-            st.session_state.current_evaluation = None
-            st.rerun()
-    
-    # Statistics in sidebar
-    if st.session_state.evaluations:
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("### Quick Stats")
-        total_evals = len(st.session_state.evaluations)
-        avg_score = sum(e.weighted_total_score for e in st.session_state.evaluations) / total_evals
-        strong_hires = sum(1 for e in st.session_state.evaluations if e.final_recommendation == RecommendationType.STRONG_HIRE)
-        
-        st.sidebar.metric("Total Evaluations", total_evals)
-        st.sidebar.metric("Average Score", f"{avg_score:.1f}%")
-        st.sidebar.metric("Strong Hires", f"{strong_hires}/{total_evals}")
-    
-    # Main content area
-    if page == "🏠 Home":
-        display_home()
-    elif page == "🎯 New Assessment":
-        display_evaluation_form()
-    elif page == "📊 View Results":
-        display_evaluation_results()
-    elif page == "📚 History":
-        display_history()
-    elif page == "⚙️ Configuration":
-        display_configuration()
-
-
-def display_home():
-    """Display the home page"""
-    
-    st.title("🎯 SkillScribe")
-    st.markdown("### AI-Powered Technical Assessment Engine")
-    
-    st.markdown("""
-    Welcome to **SkillScribe**, GovTech's advanced technical assessment platform. 
-    This system automates the evaluation of GitHub repositories against specific rubrics 
-    and answer keys, reducing evaluation time from 45+ minutes to under 5 minutes per candidate.
-    """)
-    
-    # Key features
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>⚡ Lightning Fast</h3>
-            <p>Reduce evaluation time from 45+ minutes to under 5 minutes</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>🎯 Evidence-Based</h3>
-            <p>3-layer verification: Existence → Correctness → Completeness</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div class="metric-card">
-            <h3>🧠 Human-in-Loop</h3>
-            <p>AI generates insights, humans make final decisions</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Getting started section
-    st.markdown("### 🚀 Getting Started")
-    
-    with st.container():
-        st.markdown("""
-        1. **📋 Configure Assessment** - Set up your case study and evaluation criteria
-        2. **🔗 Input Repository** - Provide the candidate's GitHub repository URL
-        3. **🤖 AI Analysis** - Our engine analyzes the code, documentation, and approach
-        4. **📊 Review Results** - Get detailed scoring with evidence trails
-        5. **✅ Make Decision** - Use AI insights to make informed hiring decisions
-        """)
-    
-    # Recent activity
-    if st.session_state.evaluations:
-        st.markdown("### 📈 Recent Activity")
-        
-        # Create timeline chart of recent evaluations
-        recent_evals = st.session_state.evaluations[-10:]  # Last 10 evaluations
-        
-        eval_data = []
-        for i, eval in enumerate(recent_evals):
-            eval_data.append({
-                "Evaluation": f"#{i+1}",
-                "Score": eval.weighted_total_score,
-                "Recommendation": eval.final_recommendation.value,
-                "Date": eval.evaluation_timestamp[:10]
-            })
-        
-        if eval_data:
-            df = pd.DataFrame(eval_data)
-            
-            fig = px.bar(
-                df, 
-                x="Evaluation", 
-                y="Score",
-                color="Recommendation",
-                title="Recent Evaluation Scores",
-                color_discrete_map={
-                    "Strong Hire": "#28a745",
-                    "Tech Interview": "#ffc107", 
-                    "Reject": "#dc3545"
-                }
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-    
-    # Quick actions
-    st.markdown("### ⚡ Quick Actions")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        if st.button("🎯 Start New Assessment", type="primary"):
-            st.session_state.page = "🎯 New Assessment"
-            st.rerun()
-    
-    with col2:
-        if st.button("📊 View Latest Results") and st.session_state.current_evaluation:
-            st.session_state.page = "📊 View Results"
-            st.rerun()
-    
-    with col3:
-        if st.button("📚 Browse History"):
-            st.session_state.page = "📚 History"
-            st.rerun()
-    
-    with col4:
-        if st.button("⚙️ Configuration"):
-            st.session_state.page = "⚙️ Configuration"
-            st.rerun()
-
-
-def display_configuration():
-    """Display configuration settings"""
-    
-    st.header("⚙️ System Configuration")
-    
-    tab1, tab2, tab3, tab4 = st.tabs(["📝 Answer Keys", "🎯 Case Studies", "⚖️ Scoring Weights", "🔧 System Settings"])
-    
-    with tab1:
-        st.subheader("📝 Answer Key Management")
-        
-        # Upload answer key
-        uploaded_file = st.file_uploader(
-            "Upload Answer Key (Excel format)",
-            type=['xlsx', 'xls'],
-            help="Upload an Excel file with columns: problem_statement, look_out_for, pitfalls, bonus"
+        # Combine scores
+        raw_score = (
+            base_score * 0.4 +
+            stakeholder_adjustment * 0.3 +
+            viz_score * 0.2 +
+            doc_score * 0.1
         )
         
-        if uploaded_file is not None:
-            try:
-                df = pd.read_excel(uploaded_file)
-                st.success("Answer key uploaded successfully!")
-                st.dataframe(df)
-                
-                # Store in session state
-                case_study_name = st.text_input("Case Study Name", value="Custom Case Study")
-                if st.button("Save Answer Key"):
-                    st.session_state.answer_keys[case_study_name] = df.to_dict('records')
-                    st.success(f"Answer key saved for '{case_study_name}'")
-            
-            except Exception as e:
-                st.error(f"Error reading file: {str(e)}")
+        weighted_score = raw_score * self.base_weight
         
-        # Display existing answer keys
-        st.markdown("### Existing Answer Keys")
-        if st.session_state.answer_keys:
-            for name, data in st.session_state.answer_keys.items():
-                with st.expander(f"📋 {name}"):
-                    st.json(data)
+        details = [
+            f"Evidence-based communication score: {base_score:.1f}%",
+            f"Stakeholder alignment: {stakeholder_adjustment:.1f}%",
+            f"Visualization quality: {viz_score:.1f}%",
+            f"Documentation quality: {doc_score:.1f}%"
+        ]
+        
+        # Calculate confidence
+        viz_count = self._count_visualizations(repo_analysis)
+        doc_count = len(repo_analysis.get("documentation", []))
+        confidence = min((viz_count + doc_count) / 5.0, 1.0)
+        
+        return ScoreBreakdown(
+            component_name="Communication Quality",
+            raw_score=raw_score,
+            weighted_score=weighted_score,
+            weight=self.base_weight,
+            evidence_count=viz_count + doc_count,
+            confidence=confidence,
+            details=details
+        )
+    
+    def _calculate_base_communication_score(self, evidence_scores: Dict[str, Any],
+                                          repo_analysis: Dict[str, Any]) -> float:
+        """Calculate base communication score from evidence"""
+        
+        # Look for communication-related evidence
+        comm_evidence = []
+        
+        for evidence_type in evidence_scores["scores"].values():
+            for item in evidence_type["items"]:
+                if any(keyword in item.description.lower() 
+                      for keyword in ["visualization", "chart", "plot", "communication", "audience"]):
+                    comm_evidence.append(item)
+        
+        if not comm_evidence:
+            return 50.0  # Default score if no communication evidence
+        
+        passed_count = sum(1 for item in comm_evidence if item.passed)
+        return (passed_count / len(comm_evidence)) * 100
+    
+    def _calculate_stakeholder_alignment(self, repo_analysis: Dict[str, Any],
+                                       stakeholder_profile: Dict[str, Any]) -> float:
+        """Calculate stakeholder alignment score"""
+        
+        audience = stakeholder_profile.get("audience", "general_public")
+        technical_level = stakeholder_profile.get("technical_level", "basic")
+        
+        # Check for appropriate complexity level
+        has_technical_jargon = self._detect_technical_jargon(repo_analysis)
+        has_clear_explanations = self._detect_clear_explanations(repo_analysis)
+        
+        if audience == "general_public":
+            if has_technical_jargon and not has_clear_explanations:
+                return 30.0  # Poor alignment - too technical
+            elif not has_technical_jargon and has_clear_explanations:
+                return 90.0  # Good alignment - appropriate for public
+            else:
+                return 60.0  # Moderate alignment
         else:
-            st.info("No custom answer keys configured. Upload one above to get started.")
+            # Technical audience
+            if has_technical_jargon:
+                return 80.0  # Good for technical audience
+            else:
+                return 60.0  # May be too simplified
     
-    with tab2:
-        st.subheader("🎯 Case Study Templates")
+    def _assess_visualization_quality(self, repo_analysis: Dict[str, Any]) -> float:
+        """Assess quality of visualizations"""
         
-        # Predefined case studies
-        case_studies = {
-            "HDB Resale Portal Impact": {
-                "description": "Analyze the business impact of HDB resale portal on property agents",
-                "hidden_dimensions": ["Buyer reliance", "Seller reliance", "Geographic variation"],
-                "stakeholder": "General Public",
-                "complexity": "Intermediate"
-            },
-            "COE Bidding Analysis": {
-                "description": "Time series analysis of Certificate of Entitlement bidding patterns",
-                "hidden_dimensions": ["Category differences", "Economic cycles", "Policy impacts"],
-                "stakeholder": "Policy Makers",
-                "complexity": "Advanced"
-            },
-            "Traffic Pattern Analysis": {
-                "description": "Urban traffic flow optimization using sensor data",
-                "hidden_dimensions": ["Peak hour effects", "Weather impact", "Event correlation"],
-                "stakeholder": "Technical Team",
-                "complexity": "Intermediate"
-            }
+        viz_count = self._count_visualizations(repo_analysis)
+        
+        if viz_count == 0:
+            return 20.0  # Low score for no visualizations
+        elif viz_count >= 3:
+            return 85.0  # Good variety of visualizations
+        else:
+            return 60.0  # Some visualizations present
+    
+    def _assess_documentation_quality(self, repo_analysis: Dict[str, Any]) -> float:
+        """Assess quality of documentation"""
+        
+        docs = repo_analysis.get("documentation", [])
+        
+        if not docs:
+            return 30.0  # Low score for no documentation
+        
+        # Check for README
+        has_readme = any("readme" in doc["path"].lower() for doc in docs)
+        
+        if has_readme:
+            return 80.0  # Good documentation
+        else:
+            return 60.0  # Some documentation
+    
+    def _count_visualizations(self, repo_analysis: Dict[str, Any]) -> int:
+        """Count visualization calls in the repository"""
+        
+        viz_count = 0
+        
+        for code_analysis in repo_analysis.get("detailed_analysis", {}).get("code_analysis", []):
+            viz_count += len(code_analysis.get("visualization_calls", []))
+        
+        for nb_analysis in repo_analysis.get("detailed_analysis", {}).get("notebook_analysis", []):
+            if nb_analysis.get("has_visualizations"):
+                viz_count += 1
+        
+        return viz_count
+    
+    def _detect_technical_jargon(self, repo_analysis: Dict[str, Any]) -> bool:
+        """Detect presence of technical jargon"""
+        
+        jargon_keywords = [
+            "p-value", "coefficient", "residual", "heteroskedasticity",
+            "autocorrelation", "stationarity", "multicollinearity"
+        ]
+        
+        # Check in documentation
+        for doc in repo_analysis.get("documentation", []):
+            # This is simplified - in practice we'd read the actual content
+            if any(keyword in doc.get("path", "").lower() for keyword in jargon_keywords):
+                return True
+        
+        return False
+    
+    def _detect_clear_explanations(self, repo_analysis: Dict[str, Any]) -> bool:
+        """Detect presence of clear explanations"""
+        
+        explanation_indicators = [
+            "explanation", "summary", "conclusion", "interpretation",
+            "what this means", "in simple terms"
+        ]
+        
+        # Check for markdown cells in notebooks
+        for nb_analysis in repo_analysis.get("detailed_analysis", {}).get("notebook_analysis", []):
+            if nb_analysis.get("markdown_cells", 0) > 2:
+                return True
+        
+        return len(repo_analysis.get("documentation", [])) > 0
+
+
+class ProblemSolvingDepthScorer:
+    """Scores problem solving depth (30% of total score)"""
+    
+    def __init__(self):
+        self.base_weight = 0.3
+    
+    def calculate_score(self, evidence_scores: Dict[str, Any],
+                       repo_analysis: Dict[str, Any],
+                       problem_elements: Dict[str, Any]) -> ScoreBreakdown:
+        """Calculate problem solving depth score"""
+        
+        # Hidden dimension coverage
+        hidden_dim_score = self._assess_hidden_dimension_coverage(
+            repo_analysis, problem_elements
+        )
+        
+        # Innovation and creativity
+        innovation_score = self._assess_innovation_level(repo_analysis, evidence_scores)
+        
+        # Methodological sophistication
+        method_score = self._assess_methodological_sophistication(repo_analysis)
+        
+        # Edge case handling
+        edge_case_score = self._assess_edge_case_handling(evidence_scores)
+        
+        # Combine scores
+        raw_score = (
+            hidden_dim_score * 0.3 +
+            innovation_score * 0.3 +
+            method_score * 0.25 +
+            edge_case_score * 0.15
+        )
+        
+        weighted_score = raw_score * self.base_weight
+        
+        details = [
+            f"Hidden dimension coverage: {hidden_dim_score:.1f}%",
+            f"Innovation and creativity: {innovation_score:.1f}%",
+            f"Methodological sophistication: {method_score:.1f}%",
+            f"Edge case handling: {edge_case_score:.1f}%"
+        ]
+        
+        # Calculate confidence
+        method_count = self._count_statistical_methods(repo_analysis)
+        confidence = min(method_count / 5.0, 1.0)
+        
+        return ScoreBreakdown(
+            component_name="Problem Solving Depth",
+            raw_score=raw_score,
+            weighted_score=weighted_score,
+            weight=self.base_weight,
+            evidence_count=method_count,
+            confidence=confidence,
+            details=details
+        )
+    
+    def _assess_hidden_dimension_coverage(self, repo_analysis: Dict[str, Any],
+                                        problem_elements: Dict[str, Any]) -> float:
+        """Assess coverage of hidden problem dimensions"""
+        
+        hidden_dimensions = problem_elements.get("hidden_dimensions", [])
+        
+        if not hidden_dimensions:
+            return 70.0  # Neutral score if no hidden dimensions specified
+        
+        covered_dimensions = 0
+        
+        # Check for evidence of addressing each hidden dimension
+        for dimension in hidden_dimensions:
+            if self._dimension_addressed_in_repo(dimension, repo_analysis):
+                covered_dimensions += 1
+        
+        if len(hidden_dimensions) == 0:
+            return 70.0
+        
+        coverage_ratio = covered_dimensions / len(hidden_dimensions)
+        return coverage_ratio * 100
+    
+    def _assess_innovation_level(self, repo_analysis: Dict[str, Any],
+                               evidence_scores: Dict[str, Any]) -> float:
+        """Assess innovation and creativity in approach"""
+        
+        # Check for bonus points achieved (indicates innovation)
+        bonus_count = len(evidence_scores.get("bonus_points", []))
+        
+        if bonus_count >= 2:
+            return 90.0  # High innovation
+        elif bonus_count == 1:
+            return 70.0  # Some innovation
+        
+        # Check for advanced statistical methods
+        advanced_methods = self._count_advanced_methods(repo_analysis)
+        
+        if advanced_methods >= 3:
+            return 80.0
+        elif advanced_methods >= 1:
+            return 60.0
+        else:
+            return 40.0
+    
+    def _assess_methodological_sophistication(self, repo_analysis: Dict[str, Any]) -> float:
+        """Assess sophistication of statistical/analytical methods"""
+        
+        method_count = self._count_statistical_methods(repo_analysis)
+        advanced_count = self._count_advanced_methods(repo_analysis)
+        
+        base_score = min(method_count * 15, 60)  # Up to 60% for basic methods
+        advanced_bonus = min(advanced_count * 20, 40)  # Up to 40% bonus for advanced
+        
+        return min(base_score + advanced_bonus, 100)
+    
+    def _assess_edge_case_handling(self, evidence_scores: Dict[str, Any]) -> float:
+        """Assess handling of edge cases and robustness"""
+        
+        completeness_items = evidence_scores["scores"]["completeness"]["items"]
+        
+        if not completeness_items:
+            return 50.0  # Default if no completeness evidence
+        
+        edge_case_items = [
+            item for item in completeness_items 
+            if any(keyword in item.description.lower() 
+                  for keyword in ["edge case", "robustness", "validation", "error handling"])
+        ]
+        
+        if not edge_case_items:
+            return 40.0  # Low score if no edge case handling
+        
+        passed_count = sum(1 for item in edge_case_items if item.passed)
+        return (passed_count / len(edge_case_items)) * 100
+    
+    def _dimension_addressed_in_repo(self, dimension: str, repo_analysis: Dict[str, Any]) -> bool:
+        """Check if a hidden dimension is addressed in the repository"""
+        
+        dimension_lower = dimension.lower()
+        
+        # Check in code analysis
+        for code_analysis in repo_analysis.get("detailed_analysis", {}).get("code_analysis", []):
+            if any(dimension_lower in var.lower() 
+                  for var in code_analysis.get("variables", [])):
+                return True
+            
+            if any(dimension_lower in func.lower() 
+                  for func in code_analysis.get("functions", [])):
+                return True
+        
+        # Check in notebook analysis
+        for nb_analysis in repo_analysis.get("detailed_analysis", {}).get("notebook_analysis", []):
+            # This is simplified - in practice we'd analyze notebook content
+            if dimension_lower in str(nb_analysis).lower():
+                return True
+        
+        return False
+    
+    def _count_statistical_methods(self, repo_analysis: Dict[str, Any]) -> int:
+        """Count statistical methods used"""
+        
+        method_keywords = [
+            "regression", "correlation", "ttest", "anova", "chi2",
+            "mean", "median", "std", "var", "describe"
+        ]
+        
+        method_count = 0
+        
+        for code_analysis in repo_analysis.get("detailed_analysis", {}).get("code_analysis", []):
+            for keyword in method_keywords:
+                if keyword in str(code_analysis.get("imports", [])).lower():
+                    method_count += 1
+                if keyword in str(code_analysis.get("function_calls", [])).lower():
+                    method_count += 1
+        
+        return method_count
+    
+    def _count_advanced_methods(self, repo_analysis: Dict[str, Any]) -> int:
+        """Count advanced statistical methods used"""
+        
+        advanced_keywords = [
+            "arima", "sarima", "prophet", "lstm", "machine learning",
+            "random forest", "gradient boost", "neural network",
+            "clustering", "dimensionality reduction", "pca"
+        ]
+        
+        advanced_count = 0
+        
+        for code_analysis in repo_analysis.get("detailed_analysis", {}).get("code_analysis", []):
+            for keyword in advanced_keywords:
+                if keyword in str(code_analysis.get("imports", [])).lower():
+                    advanced_count += 1
+                if keyword in str(code_analysis.get("function_calls", [])).lower():
+                    advanced_count += 1
+        
+        return advanced_count
+
+
+class EvaluationGenerator:
+    """Main class for generating complete evaluation reports"""
+    
+    def __init__(self):
+        self.evidence_scorer = EvidenceScorer()
+        self.technical_scorer = TechnicalComplianceScorer()
+        self.communication_scorer = CommunicationQualityScorer()
+        self.problem_solving_scorer = ProblemSolvingDepthScorer()
+    
+    def generate_evaluation(self, 
+                          candidate_repo_url: str,
+                          evidence_items: List[Any],
+                          repo_analysis: Dict[str, Any],
+                          answer_key: Dict[str, Any],
+                          problem_elements: Dict[str, Any],
+                          stakeholder_profile: Dict[str, Any],
+                          competency_assessments: List[Any] = None) -> EvaluationReport:
+        """Generate complete evaluation report"""
+        
+        # Score all evidence items
+        evidence_scores = self.evidence_scorer.score_evidence_items(evidence_items)
+        
+        # Calculate component scores
+        technical_breakdown = self.technical_scorer.calculate_score(
+            evidence_scores, answer_key
+        )
+        
+        communication_breakdown = self.communication_scorer.calculate_score(
+            evidence_scores, repo_analysis, stakeholder_profile
+        )
+        
+        problem_solving_breakdown = self.problem_solving_scorer.calculate_score(
+            evidence_scores, repo_analysis, problem_elements
+        )
+        
+        # Calculate overall weighted score
+        weighted_total_score = (
+            technical_breakdown.weighted_score +
+            communication_breakdown.weighted_score +
+            problem_solving_breakdown.weighted_score
+        )
+        
+        # Generate insights and recommendations
+        critical_strengths, critical_gaps, red_flags = self._generate_insights(
+            technical_breakdown, communication_breakdown, problem_solving_breakdown,
+            evidence_scores
+        )
+        
+        final_recommendation = self._determine_final_recommendation(
+            weighted_total_score, red_flags, evidence_scores
+        )
+        
+        growth_recommendations = self._generate_growth_recommendations(
+            critical_gaps, competency_assessments or []
+        )
+        
+        # Calculate metadata
+        evaluation_confidence = self._calculate_evaluation_confidence(
+            technical_breakdown, communication_breakdown, problem_solving_breakdown
+        )
+        
+        framework_coverage = self._calculate_framework_coverage(
+            competency_assessments or []
+        )
+        
+        # Generate evidence summary
+        evidence_summary = {
+            "existence_checks": evidence_scores["scores"]["existence"]["total"],
+            "correctness_checks": evidence_scores["scores"]["correctness"]["total"],
+            "completeness_checks": evidence_scores["scores"]["completeness"]["total"],
+            "pitfalls_triggered": len(evidence_scores["pitfall_deductions"]),
+            "bonuses_achieved": len(evidence_scores["bonus_points"])
         }
         
-        for name, details in case_studies.items():
-            with st.expander(f"📋 {name}"):
-                st.markdown(f"**Description:** {details['description']}")
-                st.markdown(f"**Stakeholder:** {details['stakeholder']}")
-                st.markdown(f"**Complexity:** {details['complexity']}")
-                st.markdown("**Hidden Dimensions:**")
-                for dim in details['hidden_dimensions']:
-                    st.markdown(f"- {dim}")
+        return EvaluationReport(
+            candidate_repo_url=candidate_repo_url,
+            evaluation_timestamp=datetime.now().isoformat(),
+            technical_compliance_score=technical_breakdown.raw_score,
+            communication_quality_score=communication_breakdown.raw_score,
+            problem_solving_depth_score=problem_solving_breakdown.raw_score,
+            weighted_total_score=weighted_total_score,
+            technical_breakdown=technical_breakdown,
+            communication_breakdown=communication_breakdown,
+            problem_solving_breakdown=problem_solving_breakdown,
+            competency_assessments=competency_assessments or [],
+            critical_strengths=critical_strengths,
+            critical_gaps=critical_gaps,
+            red_flags=red_flags,
+            final_recommendation=final_recommendation,
+            growth_recommendations=growth_recommendations,
+            evidence_summary=evidence_summary,
+            pitfall_deductions=evidence_scores["pitfall_deductions"],
+            bonus_points=evidence_scores["bonus_points"],
+            evaluation_confidence=evaluation_confidence,
+            framework_coverage=framework_coverage
+        )
     
-    with tab3:
-        st.subheader("⚖️ Scoring Configuration")
+    def _generate_insights(self, technical: ScoreBreakdown, 
+                          communication: ScoreBreakdown,
+                          problem_solving: ScoreBreakdown,
+                          evidence_scores: Dict[str, Any]) -> Tuple[List[str], List[str], List[str]]:
+        """Generate critical strengths, gaps, and red flags"""
         
-        st.markdown("### Component Weights")
+        strengths = []
+        gaps = []
+        red_flags = []
         
-        col1, col2 = st.columns(2)
+        # Analyze technical strengths/gaps
+        if technical.raw_score >= 80:
+            strengths.append("Strong technical implementation with high compliance")
+        elif technical.raw_score < 50:
+            gaps.append("Technical implementation needs significant improvement")
         
-        with col1:
-            st.markdown("**Current Default Weights:**")
-            tech_weight = st.slider("Technical Compliance", 20, 60, 40)
-            comm_weight = st.slider("Communication Quality", 20, 50, 30)
-            prob_weight = st.slider("Problem Solving Depth", 20, 40, 30)
-            
-            # Ensure weights sum to 100
-            total_weight = tech_weight + comm_weight + prob_weight
-            if total_weight != 100:
-                st.warning(f"Weights sum to {total_weight}%. Please adjust to equal 100%.")
+        # Analyze communication strengths/gaps
+        if communication.raw_score >= 80:
+            strengths.append("Excellent communication and presentation skills")
+        elif communication.raw_score < 50:
+            gaps.append("Communication and documentation need improvement")
         
-        with col2:
-            st.markdown("**Evidence Scoring Weights:**")
-            existence_weight = st.slider("Existence Verification", 10, 30, 20)
-            correctness_weight = st.slider("Correctness Verification", 40, 70, 50)
-            completeness_weight = st.slider("Completeness Verification", 20, 40, 30)
-            
-            # Pitfall and bonus settings
-            st.markdown("**Penalty/Bonus Settings:**")
-            pitfall_deduction = st.slider("Pitfall Deduction (%)", 5, 25, 15)
-            bonus_points = st.slider("Bonus Points (%)", 3, 10, 5)
+        # Analyze problem solving strengths/gaps
+        if problem_solving.raw_score >= 80:
+            strengths.append("Demonstrates deep analytical thinking and innovation")
+        elif problem_solving.raw_score < 50:
+            gaps.append("Limited depth in problem-solving approach")
+        
+        # Check for red flags
+        pitfall_count = len(evidence_scores["pitfall_deductions"])
+        if pitfall_count >= 3:
+            red_flags.append(f"Multiple critical errors detected ({pitfall_count} pitfalls)")
+        
+        if technical.raw_score < 30:
+            red_flags.append("Extremely low technical compliance score")
+        
+        return strengths, gaps, red_flags
     
-    with tab4:
-        st.subheader("🔧 System Settings")
+    def _determine_final_recommendation(self, total_score: float,
+                                      red_flags: List[str],
+                                      evidence_scores: Dict[str, Any]) -> RecommendationType:
+        """Determine final hiring recommendation"""
         
-        col1, col2 = st.columns(2)
+        # Automatic reject if critical red flags
+        if len(red_flags) >= 2:
+            return RecommendationType.REJECT
         
-        with col1:
-            st.markdown("### GitHub Integration")
-            github_token = st.text_input("GitHub Personal Access Token", type="password", help="Optional: Increases API rate limits")
-            timeout_seconds = st.number_input("Analysis Timeout (seconds)", min_value=30, max_value=300, value=120)
-            
-            st.markdown("### Evaluation Settings")
-            confidence_threshold = st.slider("Minimum Confidence Threshold", 0.5, 1.0, 0.7)
-            auto_save = st.checkbox("Auto-save evaluations", value=True)
+        # Score-based recommendations
+        if total_score >= 70:
+            return RecommendationType.STRONG_HIRE
+        elif total_score >= 50:
+            return RecommendationType.TECH_INTERVIEW
+        else:
+            return RecommendationType.REJECT
+    
+    def _generate_growth_recommendations(self, gaps: List[str],
+                                       competency_assessments: List[Any]) -> List[str]:
+        """Generate growth and development recommendations"""
         
-        with col2:
-            st.markdown("### Export Settings")
-            default_format = st.selectbox("Default Export Format", ["JSON", "Excel", "PDF"])
-            include_evidence = st.checkbox("Include evidence details in exports", value=True)
-            
-            st.markdown("### Display Preferences")
-            show_confidence = st.checkbox("Show confidence scores", value=True)
-            show_evidence_count = st.checkbox("Show evidence counts", value=True)
+        recommendations = []
         
-        if st.button("💾 Save Configuration"):
-            # In a real app, this would save to a database or config file
-            st.success("Configuration saved successfully!")
-
-
-# Additional utility functions for the Streamlit app
-def validate_github_url(url: str) -> bool:
-    """Validate GitHub repository URL format"""
-    github_pattern = r'^https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/?
-    return bool(re.match(github_pattern, url))
-
-
-def format_recommendation_badge(recommendation: RecommendationType) -> str:
-    """Format recommendation as colored badge"""
-    colors = {
-        RecommendationType.STRONG_HIRE: "🟢",
-        RecommendationType.TECH_INTERVIEW: "🟡", 
-        RecommendationType.REJECT: "🔴"
-    }
+        for gap in gaps:
+            if "technical" in gap.lower():
+                recommendations.append("Focus on strengthening core technical skills and implementation practices")
+            elif "communication" in gap.lower():
+                recommendations.append("Develop documentation and visualization skills for better stakeholder communication")
+            elif "problem" in gap.lower():
+                recommendations.append("Practice advanced analytical techniques and creative problem-solving approaches")
+        
+        # Add competency-specific recommendations
+        for assessment in competency_assessments:
+            if hasattr(assessment, 'level') and assessment.level < 2:
+                recommendations.append(f"Strengthen {assessment.competency_name} skills to reach intermediate level")
+        
+        return recommendations
     
-    return f"{colors.get(recommendation, '⚪')} {recommendation.value}"
-
-
-def create_summary_metrics():
-    """Create summary metrics for dashboard"""
-    if not st.session_state.evaluations:
-        return
+    def _calculate_evaluation_confidence(self, technical: ScoreBreakdown,
+                                       communication: ScoreBreakdown,
+                                       problem_solving: ScoreBreakdown) -> float:
+        """Calculate overall confidence in the evaluation"""
+        
+        confidence_scores = [
+            technical.confidence,
+            communication.confidence,
+            problem_solving.confidence
+        ]
+        
+        return sum(confidence_scores) / len(confidence_scores)
     
-    evaluations = st.session_state.evaluations
-    
-    # Calculate metrics
-    total_count = len(evaluations)
-    avg_score = sum(e.weighted_total_score for e in evaluations) / total_count
-    strong_hires = sum(1 for e in evaluations if e.final_recommendation == RecommendationType.STRONG_HIRE)
-    tech_interviews = sum(1 for e in evaluations if e.final_recommendation == RecommendationType.TECH_INTERVIEW)
-    rejects = sum(1 for e in evaluations if e.final_recommendation == RecommendationType.REJECT)
-    
-    # Display metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    col1.metric("Total Evaluations", total_count)
-    col2.metric("Average Score", f"{avg_score:.1f}%", f"{avg_score-70:.1f}%" if avg_score > 70 else None)
-    col3.metric("Strong Hires", strong_hires, f"{(strong_hires/total_count)*100:.1f}%")
-    col4.metric("Success Rate", f"{((strong_hires + tech_interviews)/total_count)*100:.1f}%")
-
-
-if __name__ == "__main__":
-    main()
+    def _calculate_framework_coverage(self, competency_assessments: List[Any]) -> float:
+        """Calculate coverage of competency framework"""
+        
+        if not competency_assessments:
+            return 0.0
+        
+        # This is simplified - in practice would check against full framework
+        return min(len(competency_assessments) / 10.0, 1.0)
