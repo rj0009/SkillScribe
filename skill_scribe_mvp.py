@@ -177,7 +177,7 @@ if st.button("Run Evaluation", use_container_width=True, type="primary"):
                 # Recommendation
                 if evaluation_report['recommendation'] == "Strong Hire":
                     st.balloons()
-                    st.success(f"**Recommendation:** {evaluation_report['recommendation']} �", icon="✅")
+                    st.success(f"**Recommendation:** {evaluation_report['recommendation']} 🎉", icon="✅")
                 elif evaluation_report['recommendation'] == "Tech Interview":
                     st.info(f"**Recommendation:** {evaluation_report['recommendation']}", icon="➡️")
                 else:
@@ -191,5 +191,3 @@ if st.button("Run Evaluation", use_container_width=True, type="primary"):
                 st.error(f"Evaluation failed: {ve}")
             except Exception as e:
                 st.error(f"An unexpected error occurred: {e}")
-
-�
