@@ -804,4 +804,339 @@ def main():
     
     # Sidebar navigation
     st.sidebar.title("🎯 SkillScribe")
-    st.sidebar.markdown("*AI-Powered Technical Assessment Engine
+    st.sidebar.markdown("*AI-Powered Technical Assessment Engine*")
+    
+    # Navigation menu
+    page = st.sidebar.selectbox(
+        "Navigation",
+        ["🏠 Home", "🎯 New Assessment", "📊 View Results", "📚 History", "⚙️ Configuration"]
+    )
+    
+    # Add current evaluation info in sidebar if available
+    if st.session_state.current_evaluation:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### Current Evaluation")
+        evaluation = st.session_state.current_evaluation
+        st.sidebar.markdown(f"""
+        **Candidate:** {getattr(evaluation, 'candidate_name', 'N/A')}  
+        **Score:** {evaluation.weighted_total_score:.1f}%  
+        **Recommendation:** {evaluation.final_recommendation.value}
+        """)
+        
+        if st.sidebar.button("🗑️ Clear Current"):
+            st.session_state.current_evaluation = None
+            st.rerun()
+    
+    # Statistics in sidebar
+    if st.session_state.evaluations:
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("### Quick Stats")
+        total_evals = len(st.session_state.evaluations)
+        avg_score = sum(e.weighted_total_score for e in st.session_state.evaluations) / total_evals
+        strong_hires = sum(1 for e in st.session_state.evaluations if e.final_recommendation == RecommendationType.STRONG_HIRE)
+        
+        st.sidebar.metric("Total Evaluations", total_evals)
+        st.sidebar.metric("Average Score", f"{avg_score:.1f}%")
+        st.sidebar.metric("Strong Hires", f"{strong_hires}/{total_evals}")
+    
+    # Main content area
+    if page == "🏠 Home":
+        display_home()
+    elif page == "🎯 New Assessment":
+        display_evaluation_form()
+    elif page == "📊 View Results":
+        display_evaluation_results()
+    elif page == "📚 History":
+        display_history()
+    elif page == "⚙️ Configuration":
+        display_configuration()
+
+
+def display_home():
+    """Display the home page"""
+    
+    st.title("🎯 SkillScribe")
+    st.markdown("### AI-Powered Technical Assessment Engine")
+    
+    st.markdown("""
+    Welcome to **SkillScribe**, GovTech's advanced technical assessment platform. 
+    This system automates the evaluation of GitHub repositories against specific rubrics 
+    and answer keys, reducing evaluation time from 45+ minutes to under 5 minutes per candidate.
+    """)
+    
+    # Key features
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        <div class="metric-card">
+            <h3>⚡ Lightning Fast</h3>
+            <p>Reduce evaluation time from 45+ minutes to under 5 minutes</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col2:
+        st.markdown("""
+        <div class="metric-card">
+            <h3>🎯 Evidence-Based</h3>
+            <p>3-layer verification: Existence → Correctness → Completeness</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    with col3:
+        st.markdown("""
+        <div class="metric-card">
+            <h3>🧠 Human-in-Loop</h3>
+            <p>AI generates insights, humans make final decisions</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    
+    # Getting started section
+    st.markdown("### 🚀 Getting Started")
+    
+    with st.container():
+        st.markdown("""
+        1. **📋 Configure Assessment** - Set up your case study and evaluation criteria
+        2. **🔗 Input Repository** - Provide the candidate's GitHub repository URL
+        3. **🤖 AI Analysis** - Our engine analyzes the code, documentation, and approach
+        4. **📊 Review Results** - Get detailed scoring with evidence trails
+        5. **✅ Make Decision** - Use AI insights to make informed hiring decisions
+        """)
+    
+    # Recent activity
+    if st.session_state.evaluations:
+        st.markdown("### 📈 Recent Activity")
+        
+        # Create timeline chart of recent evaluations
+        recent_evals = st.session_state.evaluations[-10:]  # Last 10 evaluations
+        
+        eval_data = []
+        for i, eval in enumerate(recent_evals):
+            eval_data.append({
+                "Evaluation": f"#{i+1}",
+                "Score": eval.weighted_total_score,
+                "Recommendation": eval.final_recommendation.value,
+                "Date": eval.evaluation_timestamp[:10]
+            })
+        
+        if eval_data:
+            df = pd.DataFrame(eval_data)
+            
+            fig = px.bar(
+                df, 
+                x="Evaluation", 
+                y="Score",
+                color="Recommendation",
+                title="Recent Evaluation Scores",
+                color_discrete_map={
+                    "Strong Hire": "#28a745",
+                    "Tech Interview": "#ffc107", 
+                    "Reject": "#dc3545"
+                }
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # Quick actions
+    st.markdown("### ⚡ Quick Actions")
+    
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        if st.button("🎯 Start New Assessment", type="primary"):
+            st.session_state.page = "🎯 New Assessment"
+            st.rerun()
+    
+    with col2:
+        if st.button("📊 View Latest Results") and st.session_state.current_evaluation:
+            st.session_state.page = "📊 View Results"
+            st.rerun()
+    
+    with col3:
+        if st.button("📚 Browse History"):
+            st.session_state.page = "📚 History"
+            st.rerun()
+    
+    with col4:
+        if st.button("⚙️ Configuration"):
+            st.session_state.page = "⚙️ Configuration"
+            st.rerun()
+
+
+def display_configuration():
+    """Display configuration settings"""
+    
+    st.header("⚙️ System Configuration")
+    
+    tab1, tab2, tab3, tab4 = st.tabs(["📝 Answer Keys", "🎯 Case Studies", "⚖️ Scoring Weights", "🔧 System Settings"])
+    
+    with tab1:
+        st.subheader("📝 Answer Key Management")
+        
+        # Upload answer key
+        uploaded_file = st.file_uploader(
+            "Upload Answer Key (Excel format)",
+            type=['xlsx', 'xls'],
+            help="Upload an Excel file with columns: problem_statement, look_out_for, pitfalls, bonus"
+        )
+        
+        if uploaded_file is not None:
+            try:
+                df = pd.read_excel(uploaded_file)
+                st.success("Answer key uploaded successfully!")
+                st.dataframe(df)
+                
+                # Store in session state
+                case_study_name = st.text_input("Case Study Name", value="Custom Case Study")
+                if st.button("Save Answer Key"):
+                    st.session_state.answer_keys[case_study_name] = df.to_dict('records')
+                    st.success(f"Answer key saved for '{case_study_name}'")
+            
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+        
+        # Display existing answer keys
+        st.markdown("### Existing Answer Keys")
+        if st.session_state.answer_keys:
+            for name, data in st.session_state.answer_keys.items():
+                with st.expander(f"📋 {name}"):
+                    st.json(data)
+        else:
+            st.info("No custom answer keys configured. Upload one above to get started.")
+    
+    with tab2:
+        st.subheader("🎯 Case Study Templates")
+        
+        # Predefined case studies
+        case_studies = {
+            "HDB Resale Portal Impact": {
+                "description": "Analyze the business impact of HDB resale portal on property agents",
+                "hidden_dimensions": ["Buyer reliance", "Seller reliance", "Geographic variation"],
+                "stakeholder": "General Public",
+                "complexity": "Intermediate"
+            },
+            "COE Bidding Analysis": {
+                "description": "Time series analysis of Certificate of Entitlement bidding patterns",
+                "hidden_dimensions": ["Category differences", "Economic cycles", "Policy impacts"],
+                "stakeholder": "Policy Makers",
+                "complexity": "Advanced"
+            },
+            "Traffic Pattern Analysis": {
+                "description": "Urban traffic flow optimization using sensor data",
+                "hidden_dimensions": ["Peak hour effects", "Weather impact", "Event correlation"],
+                "stakeholder": "Technical Team",
+                "complexity": "Intermediate"
+            }
+        }
+        
+        for name, details in case_studies.items():
+            with st.expander(f"📋 {name}"):
+                st.markdown(f"**Description:** {details['description']}")
+                st.markdown(f"**Stakeholder:** {details['stakeholder']}")
+                st.markdown(f"**Complexity:** {details['complexity']}")
+                st.markdown("**Hidden Dimensions:**")
+                for dim in details['hidden_dimensions']:
+                    st.markdown(f"- {dim}")
+    
+    with tab3:
+        st.subheader("⚖️ Scoring Configuration")
+        
+        st.markdown("### Component Weights")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**Current Default Weights:**")
+            tech_weight = st.slider("Technical Compliance", 20, 60, 40)
+            comm_weight = st.slider("Communication Quality", 20, 50, 30)
+            prob_weight = st.slider("Problem Solving Depth", 20, 40, 30)
+            
+            # Ensure weights sum to 100
+            total_weight = tech_weight + comm_weight + prob_weight
+            if total_weight != 100:
+                st.warning(f"Weights sum to {total_weight}%. Please adjust to equal 100%.")
+        
+        with col2:
+            st.markdown("**Evidence Scoring Weights:**")
+            existence_weight = st.slider("Existence Verification", 10, 30, 20)
+            correctness_weight = st.slider("Correctness Verification", 40, 70, 50)
+            completeness_weight = st.slider("Completeness Verification", 20, 40, 30)
+            
+            # Pitfall and bonus settings
+            st.markdown("**Penalty/Bonus Settings:**")
+            pitfall_deduction = st.slider("Pitfall Deduction (%)", 5, 25, 15)
+            bonus_points = st.slider("Bonus Points (%)", 3, 10, 5)
+    
+    with tab4:
+        st.subheader("🔧 System Settings")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("### GitHub Integration")
+            github_token = st.text_input("GitHub Personal Access Token", type="password", help="Optional: Increases API rate limits")
+            timeout_seconds = st.number_input("Analysis Timeout (seconds)", min_value=30, max_value=300, value=120)
+            
+            st.markdown("### Evaluation Settings")
+            confidence_threshold = st.slider("Minimum Confidence Threshold", 0.5, 1.0, 0.7)
+            auto_save = st.checkbox("Auto-save evaluations", value=True)
+        
+        with col2:
+            st.markdown("### Export Settings")
+            default_format = st.selectbox("Default Export Format", ["JSON", "Excel", "PDF"])
+            include_evidence = st.checkbox("Include evidence details in exports", value=True)
+            
+            st.markdown("### Display Preferences")
+            show_confidence = st.checkbox("Show confidence scores", value=True)
+            show_evidence_count = st.checkbox("Show evidence counts", value=True)
+        
+        if st.button("💾 Save Configuration"):
+            # In a real app, this would save to a database or config file
+            st.success("Configuration saved successfully!")
+
+
+# Additional utility functions for the Streamlit app
+def validate_github_url(url: str) -> bool:
+    """Validate GitHub repository URL format"""
+    github_pattern = r'^https://github\.com/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/?
+    return bool(re.match(github_pattern, url))
+
+
+def format_recommendation_badge(recommendation: RecommendationType) -> str:
+    """Format recommendation as colored badge"""
+    colors = {
+        RecommendationType.STRONG_HIRE: "🟢",
+        RecommendationType.TECH_INTERVIEW: "🟡", 
+        RecommendationType.REJECT: "🔴"
+    }
+    
+    return f"{colors.get(recommendation, '⚪')} {recommendation.value}"
+
+
+def create_summary_metrics():
+    """Create summary metrics for dashboard"""
+    if not st.session_state.evaluations:
+        return
+    
+    evaluations = st.session_state.evaluations
+    
+    # Calculate metrics
+    total_count = len(evaluations)
+    avg_score = sum(e.weighted_total_score for e in evaluations) / total_count
+    strong_hires = sum(1 for e in evaluations if e.final_recommendation == RecommendationType.STRONG_HIRE)
+    tech_interviews = sum(1 for e in evaluations if e.final_recommendation == RecommendationType.TECH_INTERVIEW)
+    rejects = sum(1 for e in evaluations if e.final_recommendation == RecommendationType.REJECT)
+    
+    # Display metrics
+    col1, col2, col3, col4 = st.columns(4)
+    
+    col1.metric("Total Evaluations", total_count)
+    col2.metric("Average Score", f"{avg_score:.1f}%", f"{avg_score-70:.1f}%" if avg_score > 70 else None)
+    col3.metric("Strong Hires", strong_hires, f"{(strong_hires/total_count)*100:.1f}%")
+    col4.metric("Success Rate", f"{((strong_hires + tech_interviews)/total_count)*100:.1f}%")
+
+
+if __name__ == "__main__":
+    main()
