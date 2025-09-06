@@ -1,0 +1,5 @@
+{
+  "name": "SkillScribe",
+  "description": "An intelligent hiring workflow application designed to streamline the technical assessment process. It allows HR to manage job postings, track candidates, and leverages AI for automated code evaluation, enabling a collaborative review process for assessors.",
+  "requestFramePermissions": []
+}
