@@ -78,6 +78,7 @@ const App: React.FC = () => {
             updateCandidateStatus={mockData.updateCandidateStatus}
             addGithubLink={mockData.addGithubLink}
             updateAutomatedEvaluation={mockData.updateAutomatedEvaluation}
+            scheduleOrSendCaseStudy={mockData.scheduleOrSendCaseStudy}
           />
         ) : <p>Job not found</p>;
       case 'assessment':

@@ -9,13 +9,18 @@ import AddGithubLinkForm from './AddGithubLinkForm';
 import { generateAutomatedEvaluation, generateInterviewQuestions } from '../services/geminiService';
 import { LoadingSpinner } from './icons/LoadingSpinner';
 import { QuestionMarkIcon } from './icons/QuestionMarkIcon';
+import { DocumentArrowUpIcon } from './icons/DocumentArrowUpIcon';
+import BatchUploadModal from './BatchUploadModal';
+import SendCaseStudyModal from './SendCaseStudyModal';
+import { ClockIcon } from './icons/ClockIcon';
 
 interface CandidateDashboardProps {
   job: JobPosting;
   candidates: Candidate[];
   onSelectCandidate: (candidate: Candidate) => void;
-  addCandidate: (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation'>) => void;
+  addCandidate: (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation' | 'caseStudyDeadline' | 'caseStudyEmailScheduledAt'>) => void;
   updateCandidateStatus: (candidateId: string, status: CandidateStatus) => void;
+  scheduleOrSendCaseStudy: (candidateId: string, deadline: Date, sendAt: Date) => void;
   addGithubLink: (candidateId: string, githubLink: string) => void;
   updateAutomatedEvaluation: (candidateId: string, evaluation: string) => void;
 }
@@ -23,10 +28,10 @@ interface CandidateDashboardProps {
 const CandidateCard: React.FC<{
   candidate: Candidate;
   onSelect: () => void;
-  onUpdateStatus: (status: CandidateStatus) => void;
+  onSendCaseStudy: (candidate: Candidate) => void;
   onAddGithubLink: (githubLink: string) => void;
   onEvaluate: () => Promise<void>;
-}> = ({ candidate, onSelect, onUpdateStatus, onAddGithubLink, onEvaluate }) => {
+}> = ({ candidate, onSelect, onSendCaseStudy, onAddGithubLink, onEvaluate }) => {
     const [isEvaluating, setIsEvaluating] = useState(false);
 
     const handleEvaluation = async () => {
@@ -51,9 +56,17 @@ const CandidateCard: React.FC<{
     const renderActions = () => {
         switch (candidate.status) {
             case CandidateStatus.APPLIED:
-                return <button onClick={() => onUpdateStatus(CandidateStatus.CASE_STUDY_SENT)} className="text-sm bg-primary text-white font-bold py-1 px-3 rounded-md hover:bg-secondary">Send Case Study</button>;
+                if (candidate.caseStudyEmailScheduledAt) {
+                    return (
+                        <div className="text-xs text-text-secondary italic flex items-center p-1">
+                            <ClockIcon className="h-4 w-4 mr-1.5" />
+                            <span>Scheduled for {new Date(candidate.caseStudyEmailScheduledAt).toLocaleDateString()} at {new Date(candidate.caseStudyEmailScheduledAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                        </div>
+                    );
+                }
+                return <button onClick={() => onSendCaseStudy(candidate)} className="text-sm bg-primary text-white font-bold py-1 px-3 rounded-md hover:bg-secondary">Send Case Study</button>;
             case CandidateStatus.CASE_STUDY_SENT:
-                return <AddGithubLinkForm onSubmit={onAddGithubLink} />;
+                return <AddGithubLinkForm onSubmit={onAddGithubLink} deadline={candidate.caseStudyDeadline} />;
             case CandidateStatus.CASE_STUDY_SUBMITTED:
                 return <button disabled={isEvaluating} onClick={handleEvaluation} className="text-sm bg-primary text-white font-bold py-1 px-3 rounded-md hover:bg-secondary disabled:bg-gray-400 flex items-center">{isEvaluating && <LoadingSpinner className="h-4 w-4 mr-2"/>} {isEvaluating ? 'Evaluating...' : 'Start AI Evaluation'}</button>;
             case CandidateStatus.ASSESSMENT:
@@ -90,11 +103,14 @@ const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     onSelectCandidate, 
     addCandidate, 
     updateCandidateStatus, 
+    scheduleOrSendCaseStudy,
     addGithubLink,
     updateAutomatedEvaluation
 }) => {
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isAddCandidateModalOpen, setIsAddCandidateModalOpen] = useState(false);
+  const [isBatchUploadModalOpen, setIsBatchUploadModalOpen] = useState(false);
   const [isQuestionsModalOpen, setIsQuestionsModalOpen] = useState(false);
+  const [candidateForCaseStudy, setCandidateForCaseStudy] = useState<Candidate | null>(null);
   const [generatedQuestions, setGeneratedQuestions] = useState<string[]>([]);
   const [isGeneratingQuestions, setIsGeneratingQuestions] = useState(false);
 
@@ -126,6 +142,13 @@ const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
         setIsGeneratingQuestions(false);
     }
   };
+  
+  const handleSendCaseStudySubmit = ({ deadline, sendAt }: { deadline: Date; sendAt: Date }) => {
+    if (candidateForCaseStudy) {
+        scheduleOrSendCaseStudy(candidateForCaseStudy.id, deadline, sendAt);
+    }
+    setCandidateForCaseStudy(null);
+  };
 
   return (
     <div className="animate-fade-in">
@@ -134,16 +157,23 @@ const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
                 <h2 className="text-3xl font-bold text-text-primary">Candidates for {job.title}</h2>
                 <p className="text-text-secondary mt-1">{job.division}</p>
             </div>
-             <div className="flex items-center space-x-4">
+             <div className="flex items-center space-x-2">
                 <button
                     onClick={handleGenerateQuestions}
-                    className="flex items-center bg-secondary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary transition-colors duration-300 shadow-sm"
+                    className="flex items-center bg-white border border-base-300 text-text-secondary font-bold py-2 px-4 rounded-lg hover:bg-base-200 transition-colors duration-300 shadow-sm"
                 >
                     <QuestionMarkIcon className="h-5 w-5 mr-2" />
                     Generate Questions
                 </button>
+                 <button 
+                    onClick={() => setIsBatchUploadModalOpen(true)}
+                    className="flex items-center bg-secondary text-white font-bold py-2 px-4 rounded-lg hover:bg-primary transition-colors duration-300 shadow-sm"
+                >
+                    <DocumentArrowUpIcon className="h-5 w-5 mr-2" />
+                    Batch Upload CVs
+                </button>
                 <button 
-                    onClick={() => setIsModalOpen(true)}
+                    onClick={() => setIsAddCandidateModalOpen(true)}
                     className="flex items-center bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-secondary transition-colors duration-300 shadow-sm"
                 >
                     <PlusIcon className="h-5 w-5 mr-2" />
@@ -157,7 +187,7 @@ const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
             key={c.id} 
             candidate={c} 
             onSelect={() => onSelectCandidate(c)} 
-            onUpdateStatus={(status) => updateCandidateStatus(c.id, status)}
+            onSendCaseStudy={setCandidateForCaseStudy}
             onAddGithubLink={(link) => addGithubLink(c.id, link)}
             onEvaluate={() => handleEvaluate(c)}
           />
@@ -167,12 +197,23 @@ const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
             </div>
         )}
       </div>
-       <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Add New Candidate">
+       <Modal isOpen={isAddCandidateModalOpen} onClose={() => setIsAddCandidateModalOpen(false)} title="Add New Candidate">
           <CreateCandidateForm onSubmit={(data) => {
               addCandidate({ ...data, jobId: job.id });
-              setIsModalOpen(false);
+              setIsAddCandidateModalOpen(false);
           }} />
        </Modal>
+        <BatchUploadModal 
+            isOpen={isBatchUploadModalOpen} 
+            onClose={() => setIsBatchUploadModalOpen(false)}
+            jobId={job.id}
+            addCandidate={addCandidate}
+        />
+        <SendCaseStudyModal
+            isOpen={!!candidateForCaseStudy}
+            onClose={() => setCandidateForCaseStudy(null)}
+            onSubmit={handleSendCaseStudySubmit}
+        />
         <Modal isOpen={isQuestionsModalOpen} onClose={() => setIsQuestionsModalOpen(false)} title={`Interview Questions for ${job.title}`}>
             {isGeneratingQuestions ? (
                 <div className="flex justify-center items-center h-48">

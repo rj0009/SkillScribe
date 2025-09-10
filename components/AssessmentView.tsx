@@ -2,8 +2,10 @@
 import React from 'react';
 import type { JobPosting, Candidate, Assessment } from '../types';
 import { Vote, CandidateStatus } from '../types';
-import { generateAssessorReview } from '../services/geminiService';
+import { generateAssessorReview, generateFeedbackReport } from '../services/geminiService';
 import { LoadingSpinner } from './icons/LoadingSpinner';
+import Modal from './Modal';
+import { DocumentTextIcon } from './icons/DocumentTextIcon';
 
 interface AssessmentViewProps {
   candidate: Candidate;
@@ -101,10 +103,30 @@ const AssessorCard: React.FC<{
 };
 
 const AssessmentView: React.FC<AssessmentViewProps> = ({ candidate, job, updateAssessment, updateCandidateStatus }) => {
+    const [isReportModalOpen, setIsReportModalOpen] = React.useState(false);
+    const [reportContent, setReportContent] = React.useState('');
+    const [isGeneratingReport, setIsGeneratingReport] = React.useState(false);
+    const [reportType, setReportType] = React.useState<'preliminary' | 'final'>('preliminary');
 
     const handleUpdate = (assessment: Assessment) => {
         updateAssessment(candidate.id, assessment);
     }
+
+    const handleGenerateReport = async (type: 'preliminary' | 'final') => {
+        setReportType(type);
+        setIsReportModalOpen(true);
+        setIsGeneratingReport(true);
+        setReportContent(''); // Clear previous content
+        try {
+            const report = await generateFeedbackReport(candidate, job, type);
+            setReportContent(report);
+        } catch (error) {
+            console.error("Failed to generate report", error);
+            setReportContent("Sorry, an error occurred while generating the report.");
+        } finally {
+            setIsGeneratingReport(false);
+        }
+    };
 
     const allVotesIn = candidate.assessments.every(a => a.vote !== Vote.PENDING);
     
@@ -132,8 +154,19 @@ const AssessmentView: React.FC<AssessmentViewProps> = ({ candidate, job, updateA
         } else {
              return (
                 <div className={`p-6 rounded-lg ${candidate.status === CandidateStatus.ACCEPTED ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    <p className="font-bold text-lg">Decision: {candidate.status === CandidateStatus.ACCEPTED ? "Accepted for Interview" : "Rejected"}</p>
-                    <p>HR will be notified to schedule the next steps or inform the candidate.</p>
+                     <div className="flex justify-between items-start">
+                        <div>
+                            <p className="font-bold text-lg">Decision: {candidate.status === CandidateStatus.ACCEPTED ? "Accepted for Interview" : "Rejected"}</p>
+                            <p>HR will be notified to schedule the next steps or inform the candidate.</p>
+                        </div>
+                        <button
+                            onClick={() => handleGenerateReport('final')}
+                            className="flex-shrink-0 flex items-center bg-white border border-current text-current text-sm font-semibold py-2 px-3 rounded-lg hover:bg-white/80 transition-colors duration-300 shadow-sm"
+                        >
+                            <DocumentTextIcon className="h-5 w-5 mr-2" />
+                            Generate Final Report
+                        </button>
+                    </div>
                 </div>
              );
         }
@@ -160,7 +193,18 @@ const AssessmentView: React.FC<AssessmentViewProps> = ({ candidate, job, updateA
             {/* Right Column: Assessments */}
             <div className="lg:col-span-2 space-y-6">
                 <div className="bg-base-100 p-6 rounded-lg shadow-md">
-                    <h3 className="text-xl font-bold mb-4">Assessor Reviews</h3>
+                    <div className="flex justify-between items-center mb-4">
+                        <h3 className="text-xl font-bold">Assessor Reviews</h3>
+                        {(candidate.status === CandidateStatus.ASSESSMENT || candidate.status === CandidateStatus.FINAL_REVIEW) && (
+                             <button
+                                onClick={() => handleGenerateReport('preliminary')}
+                                className="flex items-center bg-white border border-base-300 text-text-secondary text-sm font-semibold py-2 px-3 rounded-lg hover:bg-base-200 transition-colors duration-300 shadow-sm"
+                            >
+                                <DocumentTextIcon className="h-5 w-5 mr-2" />
+                                Preliminary Report
+                            </button>
+                        )}
+                    </div>
                      <div className="space-y-4">
                         {candidate.assessments.map(assessment => (
                             <AssessorCard 
@@ -176,6 +220,34 @@ const AssessmentView: React.FC<AssessmentViewProps> = ({ candidate, job, updateA
                 </div>
                 {renderFinalDecision()}
             </div>
+            <Modal 
+                isOpen={isReportModalOpen} 
+                onClose={() => setIsReportModalOpen(false)} 
+                title={`${reportType === 'preliminary' ? 'Preliminary' : 'Final'} Feedback Report`}
+            >
+                {isGeneratingReport ? (
+                    <div className="flex justify-center items-center h-48">
+                        <LoadingSpinner className="h-8 w-8 text-primary"/>
+                        <p className="ml-4 text-text-secondary">Generating report...</p>
+                    </div>
+                ) : (
+                    <div>
+                        <div 
+                          className="prose max-w-none text-text-secondary bg-base-200 p-4 rounded-md max-h-[60vh] overflow-y-auto"
+                          dangerouslySetInnerHTML={{ __html: reportContent.replace(/\n/g, '<br />') }}
+                        >
+                        </div>
+                        <div className="flex justify-end mt-6">
+                            <button
+                              onClick={() => navigator.clipboard.writeText(reportContent.replace(/<br \/>/g, '\n').replace(/#+\s/g, ''))}
+                              className="bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-secondary transition-colors duration-300 shadow-sm"
+                            >
+                                Copy to Clipboard
+                            </button>
+                        </div>
+                    </div>
+                )}
+            </Modal>
         </div>
     );
 };

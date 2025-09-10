@@ -1,17 +1,54 @@
-
 import React from 'react';
 
+// A stylized icon representing the SkillScribe logo, designed to be a more accurate representation of the brand image.
 export const CompanyIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     viewBox="0 0 24 24"
     fill="currentColor"
+    aria-label="SkillScribe Logo"
+    role="img"
     {...props}
   >
-    <path fillRule="evenodd" d="M5.625 1.5c-1.036 0-1.875.84-1.875 1.875v17.25c0 1.035.84 1.875 1.875 1.875h12.75c1.035 0 1.875-.84 1.875-1.875V12.75A3.75 3.75 0 0016.5 9h-1.875a1.875 1.875 0 01-1.875-1.875V5.25A3.75 3.75 0 009 1.5H5.625zM10.5 12a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" clipRule="evenodd" />
-    <path d="M10.5 10.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
-    <path fillRule="evenodd" d="M12.75 5.25a.75.75 0 01.75.75v3.375a3.75 3.75 0 01-1.056 2.555l-1.02 1.134a.75.75 0 11-1.12-1.004l1.02-1.134a2.25 2.25 0 00.627-1.55V6a.75.75 0 01.75-.75z" clipRule="evenodd" />
-    <path fillRule="evenodd" d="M14.25 10.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z" clipRule="evenodd" />
-    <path d="M14.25 9a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z" />
+    <g stroke="currentColor" strokeWidth="1" fill="none" strokeLinecap="round" strokeLinejoin="round">
+      {/* Main circles */}
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="5" />
+
+      {/* Spokes (from inner circle to outer dots) */}
+      <path d="M12 7 V2" /> {/* Top */}
+      <path d="M17 12 H22" /> {/* Right */}
+      <path d="M12 17 V22" /> {/* Bottom */}
+      <path d="M7 12 H2" /> {/* Left */}
+      <path d="M15.53 8.46 L19.29 4.71" /> {/* Top-Right */}
+      <path d="M15.53 15.53 L19.29 19.29" /> {/* Bottom-Right */}
+      <path d="M8.46 15.53 L4.71 19.29" /> {/* Bottom-Left */}
+      <path d="M8.46 8.46 L4.71 4.71" /> {/* Top-Left */}
+      
+      {/* Webbing (connecting outer dots to adjacent inner points) */}
+      <path d="M12 2 L15.53 8.46" />
+      <path d="M12 2 L8.46 8.46" />
+      
+      <path d="M22 12 L15.53 8.46" />
+      <path d="M22 12 L15.53 15.53" />
+      
+      <path d="M12 22 L15.53 15.53" />
+      <path d="M12 22 L8.46 15.53" />
+      
+      <path d="M2 12 L8.46 15.53" />
+      <path d="M2 12 L8.46 8.46" />
+    </g>
+
+    {/* The 8 outer dots (filled) */}
+    <g fill="currentColor" stroke="none">
+      <circle cx="12" cy="2" r="1.2" />
+      <circle cx="19.29" cy="4.71" r="1.2" />
+      <circle cx="22" cy="12" r="1.2" />
+      <circle cx="19.29" cy="19.29" r="1.2" />
+      <circle cx="12" cy="22" r="1.2" />
+      <circle cx="4.71" cy="19.29" r="1.2" />
+      <circle cx="2" cy="12" r="1.2" />
+      <circle cx="4.71" cy="4.71" r="1.2" />
+    </g>
   </svg>
 );

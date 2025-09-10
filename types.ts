@@ -54,6 +54,8 @@ export interface Candidate {
   assessors: Assessor[];
   assessments: Assessment[];
   automatedEvaluation: string | null;
+  caseStudyDeadline: Date | null;
+  caseStudyEmailScheduledAt: Date | null;
 }
 
 export type ViewState = 

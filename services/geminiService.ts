@@ -1,7 +1,7 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import type { JobPosting, Candidate } from '../types';
-import { Vote } from '../types';
+import { Vote, CandidateStatus } from '../types';
 
 
 // Ensure you have a .env file with your API_KEY
@@ -147,6 +147,150 @@ export const generateAssessorReview = async (evaluation: string | null, vote: Vo
     return "Error generating AI review. Please try again later.";
   }
 };
+
+export const parseCv = async (base64Content: string, mimeType: string): Promise<{ name: string; email: string }> => {
+  if (!API_KEY) {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    return { name: `Mock Candidate`, email: 'mock.cv.candidate@example.com' };
+  }
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              data: base64Content,
+              mimeType,
+            },
+          },
+          { text: "Extract the full name and email address from this resume/CV document. Provide the output in JSON format." },
+        ],
+      },
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            name: {
+              type: Type.STRING,
+              description: "The candidate's full name.",
+            },
+            email: {
+              type: Type.STRING,
+              description: "The candidate's email address.",
+            },
+          },
+          required: ['name', 'email'],
+        },
+      },
+    });
+
+    const parsedJson = JSON.parse(response.text.trim());
+    if (!parsedJson.name || !parsedJson.email) {
+        throw new Error("Parsed JSON is missing name or email.");
+    }
+    return parsedJson;
+
+  } catch (error) {
+    console.error("Error calling Gemini API for CV parsing:", error);
+    throw new Error("Failed to parse CV with AI. The document might be unreadable or in an unsupported format.");
+  }
+};
+
+export const generateFeedbackReport = async (
+  candidate: Candidate, 
+  job: JobPosting, 
+  reportType: 'preliminary' | 'final'
+): Promise<string> => {
+  if (!API_KEY) {
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    return `
+# ${reportType.charAt(0).toUpperCase() + reportType.slice(1)} Feedback Report for ${candidate.name}
+
+**Role:** ${job.title}
+
+---
+
+### Summary
+This is a mock-generated report. The candidate has shown strong potential. The final decision was **${candidate.status === CandidateStatus.ACCEPTED ? 'Accepted for Interview' : 'Rejected'}**.
+
+### Strengths
+- Good understanding of core concepts.
+- Clean and well-structured code submission.
+
+### Areas for Improvement
+- More comprehensive testing could be beneficial.
+- Lacks documentation in some areas.
+
+### Next Steps
+${reportType === 'final' 
+  ? (candidate.status === CandidateStatus.ACCEPTED 
+      ? 'We will be in touch shortly to schedule the next round of interviews.' 
+      : 'While we are not moving forward at this time, we encourage you to apply for future roles.') 
+  : 'The assessment is still in progress. Further review is required.'
+}
+    `;
+  }
+
+  try {
+    const reviewsSummary = candidate.assessments
+      .filter(a => a.review.trim() !== '')
+      .map(a => `- Assessor (${a.vote}): "${a.review}"`)
+      .join('\n');
+      
+    const finalDecision = `The final decision for this candidate is: **${candidate.status}**.`;
+
+    const prompt = `
+      As an impartial and professional HR manager, generate a candidate feedback report. The report should be encouraging and constructive, even if the feedback is negative.
+      The report is for a candidate named '${candidate.name}' who applied for the '${job.title}' role.
+      
+      This is a '${reportType}' report.
+      - A 'preliminary' report is for internal discussion while assessment is ongoing.
+      - A 'final' report is generated after a decision has been made and can be shared with the candidate.
+
+      Here is the available information:
+      
+      **Automated AI Code Evaluation:**
+      ---
+      ${candidate.automatedEvaluation || 'Not available.'}
+      ---
+      
+      **Internal Assessor Reviews:**
+      ---
+      ${reviewsSummary || 'No manual reviews submitted yet.'}
+      ---
+      
+      ${reportType === 'final' ? `**Final Decision:**\n${finalDecision}\n---` : ''}
+
+      Based on ALL the information provided, structure the report in Markdown with the following sections:
+      - A title: "# ${reportType === 'preliminary' ? 'Preliminary' : 'Final'} Feedback Report for ${candidate.name}"
+      - The role they applied for.
+      - A horizontal rule.
+      - "### Summary": A brief, 2-3 sentence overview of the candidate's performance and the overall outcome.
+      - "### Strengths": 2-3 bullet points highlighting what the candidate did well, based on positive aspects from the AI evaluation and assessor reviews.
+      - "### Areas for Improvement": 2-3 bullet points on specific, actionable areas for growth, framed constructively.
+      - "### Next Steps": 
+        - If it's a 'preliminary' report, state that the review is ongoing.
+        - If it's a 'final' report, clearly state the outcome based on the final decision. If 'Accepted for Interview', congratulate them and mention next steps. If 'Rejected', thank them for their time and effort and wish them luck, while being clear about the decision.
+      
+      Do not add any text before the title or after the "Next Steps" section.
+    `;
+    
+    const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+    });
+    
+    return response.text;
+
+  } catch (error) {
+    console.error("Error calling Gemini API for feedback report:", error);
+    return "Error generating feedback report. Please try again later.";
+  }
+};
+
 
 export const generateWorkflowsDocument = async (): Promise<string> => {
     // Simulate a delay as if fetching from a source

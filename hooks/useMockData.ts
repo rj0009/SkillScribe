@@ -1,3 +1,4 @@
+
 import { useState } from 'react';
 import type { JobPosting, Candidate, Assessment, Assessor } from '../types';
 import { JobStatus, CandidateStatus, Vote } from '../types';
@@ -34,6 +35,8 @@ const initialCandidates: Candidate[] = [
         assessors: [],
         assessments: [],
         automatedEvaluation: null,
+        caseStudyDeadline: null,
+        caseStudyEmailScheduledAt: null,
     },
     {
         id: 'cand-2',
@@ -53,7 +56,9 @@ const initialCandidates: Candidate[] = [
             { assessorId: 'assessor-2', assessorName: 'Bob Williams', review: '', vote: Vote.PENDING },
             { assessorId: 'assessor-3', assessorName: 'Charlie Brown', review: '', vote: Vote.PENDING },
         ],
-        automatedEvaluation: "The project demonstrates a good understanding of React components and props. However, the code lacks proper error handling and could be structured more efficiently. The CSS is not responsive, which is a key requirement. Overall, a decent attempt but needs refinement."
+        automatedEvaluation: "The project demonstrates a good understanding of React components and props. However, the code lacks proper error handling and could be structured more efficiently. The CSS is not responsive, which is a key requirement. Overall, a decent attempt but needs refinement.",
+        caseStudyDeadline: new Date('2025-07-01T23:59:00Z'),
+        caseStudyEmailScheduledAt: null,
     },
     {
         id: 'cand-3',
@@ -66,6 +71,8 @@ const initialCandidates: Candidate[] = [
         assessors: [],
         assessments: [],
         automatedEvaluation: null,
+        caseStudyDeadline: new Date('2025-06-28T23:59:00Z'),
+        caseStudyEmailScheduledAt: null,
     },
 ];
 
@@ -83,7 +90,7 @@ export const useMockData = () => {
     setJobPostings(prev => [newJob, ...prev]);
   };
 
-  const addCandidate = (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation'>) => {
+  const addCandidate = (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation' | 'caseStudyDeadline' | 'caseStudyEmailScheduledAt'>) => {
     const newCandidate: Candidate = {
       ...candidate,
       id: `cand-${Date.now()}`,
@@ -93,6 +100,8 @@ export const useMockData = () => {
       assessors: [],
       assessments: [],
       automatedEvaluation: null,
+      caseStudyDeadline: null,
+      caseStudyEmailScheduledAt: null,
     };
     setCandidates(prev => [...prev, newCandidate]);
   };
@@ -119,6 +128,24 @@ export const useMockData = () => {
         return updatedCandidate;
       }
       return c;
+    }));
+  };
+
+  const scheduleOrSendCaseStudy = (candidateId: string, deadline: Date, sendAt: Date) => {
+    const now = new Date();
+    // Treat schedules within the next minute as "now" to avoid weird UI states
+    const isScheduledForFuture = sendAt.getTime() > now.getTime() + 60000;
+
+    setCandidates(prev => prev.map(c => {
+        if (c.id === candidateId) {
+            return {
+                ...c,
+                caseStudyDeadline: deadline,
+                caseStudyEmailScheduledAt: isScheduledForFuture ? sendAt : null,
+                status: isScheduledForFuture ? CandidateStatus.APPLIED : CandidateStatus.CASE_STUDY_SENT,
+            };
+        }
+        return c;
     }));
   };
   
@@ -152,6 +179,7 @@ export const useMockData = () => {
     addJobPosting, 
     addCandidate, 
     updateCandidateStatus,
+    scheduleOrSendCaseStudy,
     addGithubLink,
     updateAutomatedEvaluation,
     updateAssessment,
