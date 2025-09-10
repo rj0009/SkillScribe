@@ -1,17 +1,17 @@
 import React, { useState } from 'react';
 import type { JobPosting, Candidate } from '../types';
 import { JobStatus, CandidateStatus } from '../types';
-import { BriefcaseIcon } from './icons/BriefcaseIcon';
+import { BriefcaseIcon } from './BriefcaseIcon';
 import { UsersIcon } from './icons/UsersIcon';
 import { DocumentCheckIcon } from './icons/DocumentCheckIcon';
-import { CheckCircleIcon } from './icons/CheckCircleIcon';
+import { CheckCircleIcon } from './CheckCircleIcon';
 import Modal from './Modal';
 import { generateWorkflowsDocument } from '../services/geminiService';
 import { LoadingSpinner } from './icons/LoadingSpinner';
 import { DocumentTextIcon } from './icons/DocumentTextIcon';
 import PipelineChart from './PipelineChart';
 import { PlusIcon } from './icons/PlusIcon';
-import CreateJobPostingForm from './CreateJobPostingForm';
+import CreateJobPostingForm from './icons/CreateJobPostingForm';
 
 
 interface HiringOverviewDashboardProps {

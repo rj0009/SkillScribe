@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import type { JobPosting } from '../types';
-import { INTERVIEW_PROCESS_OPTIONS, DIVISION_OPTIONS, JOB_TITLE_OPTIONS } from '../constants';
+import type { JobPosting } from '../../types';
+import { INTERVIEW_PROCESS_OPTIONS, DIVISION_OPTIONS, JOB_TITLE_OPTIONS } from '../../constants';
 
 interface CreateJobPostingFormProps {
   onSubmit: (data: Omit<JobPosting, 'id' | 'createdAt' | 'status'>) => void;

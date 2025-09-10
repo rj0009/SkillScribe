@@ -4,7 +4,7 @@ import type { JobPosting } from '../types';
 import { JobStatus } from '../types';
 import { PlusIcon } from './icons/PlusIcon';
 import Modal from './Modal';
-import CreateJobPostingForm from './CreateJobPostingForm';
+import CreateJobPostingForm from './icons/CreateJobPostingForm';
 
 interface JobPostingDashboardProps {
   jobPostings: JobPosting[];
