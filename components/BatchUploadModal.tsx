@@ -14,7 +14,7 @@ interface BatchUploadModalProps {
   jobId: string;
   // Fix: Corrected the type for the `addCandidate` prop to align with its implementation,
   // omitting properties that are set by default upon candidate creation.
-  addCandidate: (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation' | 'caseStudyDeadline' | 'caseStudyEmailScheduledAt'>) => void;
+  addCandidate: (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation' | 'caseStudyDeadline'>) => void;
 }
 
 type Status = 'idle' | 'parsing' | 'success' | 'error';

@@ -12,6 +12,7 @@ const initialJobPostings: JobPosting[] = [
     process: INTERVIEW_PROCESS_OPTIONS[0],
     status: JobStatus.OPEN,
     createdAt: new Date('2025-06-20T10:00:00Z'),
+    remarks: 'Urgent hiring for a new project. Looking for candidates with strong React and TypeScript skills.',
   },
   {
     id: 'job-2',
@@ -20,6 +21,7 @@ const initialJobPostings: JobPosting[] = [
     process: INTERVIEW_PROCESS_OPTIONS[2],
     status: JobStatus.OPEN,
     createdAt: new Date('2025-06-18T14:30:00Z'),
+    remarks: 'Requires certification in AWS or GCP. Security clearance is a plus.',
   },
 ];
 
@@ -36,7 +38,6 @@ const initialCandidates: Candidate[] = [
         assessments: [],
         automatedEvaluation: null,
         caseStudyDeadline: null,
-        caseStudyEmailScheduledAt: null,
     },
     {
         id: 'cand-2',
@@ -58,7 +59,6 @@ const initialCandidates: Candidate[] = [
         ],
         automatedEvaluation: "The project demonstrates a good understanding of React components and props. However, the code lacks proper error handling and could be structured more efficiently. The CSS is not responsive, which is a key requirement. Overall, a decent attempt but needs refinement.",
         caseStudyDeadline: new Date('2025-07-01T23:59:00Z'),
-        caseStudyEmailScheduledAt: null,
     },
     {
         id: 'cand-3',
@@ -72,7 +72,6 @@ const initialCandidates: Candidate[] = [
         assessments: [],
         automatedEvaluation: null,
         caseStudyDeadline: new Date('2025-06-28T23:59:00Z'),
-        caseStudyEmailScheduledAt: null,
     },
 ];
 
@@ -90,7 +89,7 @@ export const useMockData = () => {
     setJobPostings(prev => [newJob, ...prev]);
   };
 
-  const addCandidate = (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation' | 'caseStudyDeadline' | 'caseStudyEmailScheduledAt'>) => {
+  const addCandidate = (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation' | 'caseStudyDeadline'>) => {
     const newCandidate: Candidate = {
       ...candidate,
       id: `cand-${Date.now()}`,
@@ -101,7 +100,6 @@ export const useMockData = () => {
       assessments: [],
       automatedEvaluation: null,
       caseStudyDeadline: null,
-      caseStudyEmailScheduledAt: null,
     };
     setCandidates(prev => [...prev, newCandidate]);
   };
@@ -131,18 +129,13 @@ export const useMockData = () => {
     }));
   };
 
-  const scheduleOrSendCaseStudy = (candidateId: string, deadline: Date, sendAt: Date) => {
-    const now = new Date();
-    // Treat schedules within the next minute as "now" to avoid weird UI states
-    const isScheduledForFuture = sendAt.getTime() > now.getTime() + 60000;
-
+  const sendCaseStudy = (candidateId: string, deadline: Date) => {
     setCandidates(prev => prev.map(c => {
         if (c.id === candidateId) {
             return {
                 ...c,
                 caseStudyDeadline: deadline,
-                caseStudyEmailScheduledAt: isScheduledForFuture ? sendAt : null,
-                status: isScheduledForFuture ? CandidateStatus.APPLIED : CandidateStatus.CASE_STUDY_SENT,
+                status: CandidateStatus.CASE_STUDY_SENT,
             };
         }
         return c;
@@ -179,7 +172,7 @@ export const useMockData = () => {
     addJobPosting, 
     addCandidate, 
     updateCandidateStatus,
-    scheduleOrSendCaseStudy,
+    sendCaseStudy,
     addGithubLink,
     updateAutomatedEvaluation,
     updateAssessment,

@@ -5,7 +5,7 @@ import { Vote, CandidateStatus } from '../types';
 
 
 // Ensure you have a .env file with your API_KEY
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const API_KEY = process.env.API_KEY;
 
 if (!API_KEY) {
   console.warn("Gemini API key not found. Using mocked responses. Please set process.env.API_KEY.");

@@ -11,6 +11,7 @@ export interface JobPosting {
   process: string;
   status: JobStatus;
   createdAt: Date;
+  remarks: string;
 }
 
 export enum CandidateStatus {
@@ -55,7 +56,6 @@ export interface Candidate {
   assessments: Assessment[];
   automatedEvaluation: string | null;
   caseStudyDeadline: Date | null;
-  caseStudyEmailScheduledAt: Date | null;
 }
 
 export type ViewState = 

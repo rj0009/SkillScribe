@@ -18,9 +18,9 @@ interface CandidateDashboardProps {
   job: JobPosting;
   candidates: Candidate[];
   onSelectCandidate: (candidate: Candidate) => void;
-  addCandidate: (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation' | 'caseStudyDeadline' | 'caseStudyEmailScheduledAt'>) => void;
+  addCandidate: (candidate: Omit<Candidate, 'id' | 'appliedAt' | 'status' | 'githubLink' | 'assessors' | 'assessments' | 'automatedEvaluation' | 'caseStudyDeadline'>) => void;
   updateCandidateStatus: (candidateId: string, status: CandidateStatus) => void;
-  scheduleOrSendCaseStudy: (candidateId: string, deadline: Date, sendAt: Date) => void;
+  sendCaseStudy: (candidateId: string, deadline: Date) => void;
   addGithubLink: (candidateId: string, githubLink: string) => void;
   updateAutomatedEvaluation: (candidateId: string, evaluation: string) => void;
 }
@@ -56,14 +56,6 @@ const CandidateCard: React.FC<{
     const renderActions = () => {
         switch (candidate.status) {
             case CandidateStatus.APPLIED:
-                if (candidate.caseStudyEmailScheduledAt) {
-                    return (
-                        <div className="text-xs text-text-secondary italic flex items-center p-1">
-                            <ClockIcon className="h-4 w-4 mr-1.5" />
-                            <span>Scheduled for {new Date(candidate.caseStudyEmailScheduledAt).toLocaleDateString()} at {new Date(candidate.caseStudyEmailScheduledAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                        </div>
-                    );
-                }
                 return <button onClick={() => onSendCaseStudy(candidate)} className="text-sm bg-primary text-white font-bold py-1 px-3 rounded-md hover:bg-secondary">Send Case Study</button>;
             case CandidateStatus.CASE_STUDY_SENT:
                 return <AddGithubLinkForm onSubmit={onAddGithubLink} deadline={candidate.caseStudyDeadline} />;
@@ -103,7 +95,7 @@ const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     onSelectCandidate, 
     addCandidate, 
     updateCandidateStatus, 
-    scheduleOrSendCaseStudy,
+    sendCaseStudy,
     addGithubLink,
     updateAutomatedEvaluation
 }) => {
@@ -143,9 +135,9 @@ const CandidateDashboard: React.FC<CandidateDashboardProps> = ({
     }
   };
   
-  const handleSendCaseStudySubmit = ({ deadline, sendAt }: { deadline: Date; sendAt: Date }) => {
+  const handleSendCaseStudySubmit = ({ deadline }: { deadline: Date; }) => {
     if (candidateForCaseStudy) {
-        scheduleOrSendCaseStudy(candidateForCaseStudy.id, deadline, sendAt);
+        sendCaseStudy(candidateForCaseStudy.id, deadline);
     }
     setCandidateForCaseStudy(null);
   };

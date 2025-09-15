@@ -74,13 +74,6 @@ const HiringOverviewDashboard: React.FC<HiringOverviewDashboardProps> = ({ jobPo
             </div>
              <div className="flex items-center space-x-2">
                 <button
-                    onClick={handleGenerateWorkflows}
-                    className="flex items-center bg-base-100 text-text-secondary font-bold py-2 px-4 rounded-lg hover:bg-base-300 transition-colors duration-300 shadow-sm border border-base-300"
-                >
-                    <DocumentTextIcon className="h-5 w-5 mr-2" />
-                    Generate Workflow Guide
-                </button>
-                <button
                     onClick={() => setIsCreateJobModalOpen(true)}
                     className="flex items-center bg-primary text-white font-bold py-2 px-4 rounded-lg hover:bg-secondary transition-colors duration-300 shadow-sm"
                 >
@@ -117,8 +110,10 @@ const HiringOverviewDashboard: React.FC<HiringOverviewDashboardProps> = ({ jobPo
             <table className="min-w-full divide-y divide-base-300">
                 <thead className="bg-base-200">
                     <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Job ID</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Job Title</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Division</th>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Remarks</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Candidates</th>
                         <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase tracking-wider">Status</th>
                         <th scope="col" className="relative px-6 py-3"><span className="sr-only">View</span></th>
@@ -129,8 +124,10 @@ const HiringOverviewDashboard: React.FC<HiringOverviewDashboardProps> = ({ jobPo
                         const candidateCount = candidates.filter(c => c.jobId === job.id).length;
                         return (
                             <tr key={job.id}>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">{job.id}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-text-primary">{job.title}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary">{job.division}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary max-w-xs truncate" title={job.remarks}>{job.remarks || '-'}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-text-secondary">{candidateCount}</td>
                                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                                      <span className="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 text-green-800">

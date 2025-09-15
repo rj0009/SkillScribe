@@ -10,6 +10,7 @@ const CreateJobPostingForm: React.FC<CreateJobPostingFormProps> = ({ onSubmit })
   const [title, setTitle] = useState(JOB_TITLE_OPTIONS[0]);
   const [division, setDivision] = useState(DIVISION_OPTIONS[0]);
   const [process, setProcess] = useState(INTERVIEW_PROCESS_OPTIONS[0]);
+  const [remarks, setRemarks] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,11 +18,12 @@ const CreateJobPostingForm: React.FC<CreateJobPostingFormProps> = ({ onSubmit })
       alert('Please fill out all fields.');
       return;
     }
-    onSubmit({ title, division, process });
+    onSubmit({ title, division, process, remarks });
     // Reset form
     setTitle(JOB_TITLE_OPTIONS[0]);
     setDivision(DIVISION_OPTIONS[0]);
     setProcess(INTERVIEW_PROCESS_OPTIONS[0]);
+    setRemarks('');
   };
 
   return (
@@ -73,6 +75,17 @@ const CreateJobPostingForm: React.FC<CreateJobPostingFormProps> = ({ onSubmit })
             </option>
           ))}
         </select>
+      </div>
+      <div>
+        <label htmlFor="remarks" className="block text-sm font-medium text-text-secondary">Additional Remarks (Optional)</label>
+        <textarea
+            id="remarks"
+            value={remarks}
+            onChange={(e) => setRemarks(e.target.value)}
+            rows={3}
+            className="mt-1 block w-full px-3 py-2 bg-base-100 border border-base-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+            placeholder="e.g., Urgent hiring, specific skill requirements..."
+        />
       </div>
       <div className="flex justify-end pt-2">
         <button
